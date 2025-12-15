@@ -1,4 +1,9 @@
 name = "insecure-xml-proxy"
 main = "src/index.js"
 compatibility_date = "2025-12-14"
-workers_dev = false
+workers_dev = true
+
+# --- Add the observability block here ---
+[observability]
+enabled = true  # Set this to true to ensure it's turned on
+# ---------------------------------------
