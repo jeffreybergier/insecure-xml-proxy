@@ -11,12 +11,10 @@ export default {
     
     // TODO: Check for key parameter to authenticate
     
-    if (requestURL.searchParams.get('url')) {
-      if (Asset.isAsset(request)) {
-        return Asset.getAsset(request, env, ctx);
-      } else if (Feed.isFeed(request)) {
-        return Feed.getFeed(request, env, ctx);
-      }
+    if (Feed.targetFeedURL(request)) {
+      return Feed.getFeed(request, env, ctx);
+    } else if (Asset.targetAssetURL(request)) {
+      return Asset.getAsset(request, env, ctx);
     }
     
     console.log(`[index.js] fallback`);

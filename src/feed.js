@@ -1,22 +1,31 @@
 
-export function isFeed(request) {
+export function targetFeedURL(request) {
   const kConfirm = '/feed';
   const requestURL = new URL(request.url);
   const requestPath = requestURL.pathname;
-  return requestPath.startsWith(kConfirm);
-  return requestPath.startsWith(kProxyPath);
+  if (!requestPath.startsWith(kConfirm)) { return null; }
+  const targetURL = requestURL.searchParams.get('url');
+  if (targetURL) { return targetURL; }
+  const targetPURL = requestURL.searchParams.get('purl');
+  if (targetPURL) {
+    try {
+      const targetPURLDecoded = decodeURIComponent(targetPURL);
+      return targetPURLDecoded;
+    } catch (e) {
+      console.error(`[feed.js] Failed to decode purl: ${targetPURL}`);
+    }
+  }
+  return null;
 }
 
 export async function getFeed(request, env, ctx) {
-  if (!isFeed(request)) { throw `Not Feed: ${request}`; }
+  const targetURL = targetFeedURL(request);
   const requestURL = new URL(request.url);
-  const targetURL = requestURL.searchParams.get('url');
+  if (!targetURL || !requestURL) { throw `[feed.js] requestURL or targetURL was NULL`; }
   let response;
   try {
     console.log(`[feed.js] fetch(${targetURL})`);
-    response = await fetch(targetURL, {
-      headers: request.headers 
-    });
+    response = await fetch(targetURL);
   } catch (error) {
     console.error(`[feed.js] fetch() ${error.message}`);
     return new Response(`[feed.js] fetch() ${error.message}`, { status: 500 });
@@ -28,14 +37,16 @@ export async function getFeed(request, env, ctx) {
   }
   
   const proxyOrigin = requestURL.origin;
-  const replacementPattern = `${proxyOrigin}/asset?url=$1`;
   const searchPattern = /(https?:\/\/[^\s"']*\.(?:jpg|jpeg|gif|png|webm|mp3|aac)[^\s"']*)/gi;
   
   console.log(`[feed.js] response.text()`);
   const originalXML = await response.text();
   
   console.log(`[feed.js] originalXML.replace()`);
-  const rewrittenXML = originalXML.replace(searchPattern, replacementPattern);
+  const rewrittenXML = originalXML.replace(searchPattern, (match) => {
+    const encodedMatch = encodeURIComponent(match);
+    return `${proxyOrigin}/asset?purl=${encodedMatch}`;
+  });
   
   const headers = new Headers(response.headers);
   headers.delete('Content-Length');

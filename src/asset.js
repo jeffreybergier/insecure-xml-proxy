@@ -1,22 +1,32 @@
 
-export function isAsset(request) {
+export function targetAssetURL(request) {
   const kConfirm = '/asset';
   const requestURL = new URL(request.url);
   const requestPath = requestURL.pathname;
-  return requestPath.startsWith(kConfirm);
+  if (!requestPath.startsWith(kConfirm)) { return null; }
+  const targetURL = requestURL.searchParams.get('url');
+  if (targetURL) { return targetURL; }
+  const targetPURL = requestURL.searchParams.get('purl');
+  if (targetPURL) {
+    try {
+      const targetPURLDecoded = decodeURIComponent(targetPURL);
+      return targetPURLDecoded;
+    } catch (e) {
+      console.error(`[asset.js] Failed to decode purl: ${targetPURL}`);
+    }
+  }
+  return null;
 }
 
 export async function getAsset(request, env, ctx) {
-  if (!isAsset(request)) { throw `Not Asset: ${request}`; }
+  const targetURL = targetAssetURL(request);
   const requestURL = new URL(request.url);
-  const targetURL = requestURL.searchParams.get('url');
+  if (!targetURL || !requestURL) { throw `[asset.js] requestURL or targetURL was NULL`; }
 
   let response;
   try {
     console.log(`[asset.js] fetch(${targetURL})`);
-    response = await fetch(targetURL, {
-      headers: request.headers 
-    });
+    response = await fetch(targetURL);
   } catch (error) {
     console.error(`[asset.js] fetch() ${error.message}`);
     return new Response(`[asset.js] fetch() ${error.message}`, { status: 500 });
