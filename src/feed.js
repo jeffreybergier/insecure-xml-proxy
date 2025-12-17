@@ -1,5 +1,5 @@
 
-export function targetFeedURL(request) {
+export function getTargetURL(request) {
   const kConfirm = '/feed';
   const requestURL = new URL(request.url);
   const requestPath = requestURL.pathname;
@@ -19,7 +19,7 @@ export function targetFeedURL(request) {
 }
 
 export async function getFeed(request, env, ctx) {
-  const targetURL = targetFeedURL(request);
+  const targetURL = getTargetURL(request);
   const requestURL = new URL(request.url);
   if (!targetURL || !requestURL) { throw `[feed.js] requestURL or targetURL was NULL`; }
   let response;

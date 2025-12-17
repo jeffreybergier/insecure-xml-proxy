@@ -1,5 +1,5 @@
 
-export function targetAssetURL(request) {
+export function getTargetURL(request) {
   const kConfirm = '/asset';
   const requestURL = new URL(request.url);
   const requestPath = requestURL.pathname;
@@ -19,7 +19,7 @@ export function targetAssetURL(request) {
 }
 
 export async function getAsset(request, env, ctx) {
-  const targetURL = targetAssetURL(request);
+  const targetURL = getTargetURL(request);
   const requestURL = new URL(request.url);
   if (!targetURL || !requestURL) { throw `[asset.js] requestURL or targetURL was NULL`; }
 
