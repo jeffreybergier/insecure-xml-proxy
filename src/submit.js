@@ -1,7 +1,7 @@
 import * as Codec from './codec.js';
 
 export function isSubmit(request) {
-  const kConfirm = '/submit';
+  const kConfirm = '/proxy/submit';
   const requestURL = new URL(request.url);
   const requestPath = requestURL.pathname;
   return requestPath.startsWith(kConfirm) || false;
@@ -10,7 +10,7 @@ export function isSubmit(request) {
 export async function getPage(request, env, ctx) {
   const requestURL = new URL(request.url);
   const targetURLString = requestURL.searchParams.get('url');
-  const encodedURL = Codec.encode(request.url, targetURLString, "/feed");
+  const encodedURL = Codec.encode(request.url, targetURLString, "/proxy/feed");
 
   const htmlContent = `
 <!DOCTYPE html>
@@ -98,7 +98,7 @@ export function getForm() {
   proxy so that legacy computers with outdated or no TLS/SSL support can
   subscribe to website RSS feeds and podcast RSS feeds</p>
   <h2>Generate Proxied RSS URL</h2>
-  <form action="/submit" method="GET">
+  <form action="/proxy/submit" method="GET">
     <label for="key">API Key:</label>
     <input type="text" id="key" name="key" placeholder="Your secret key" required>
     <label for="url">Original RSS Feed URL:</label>

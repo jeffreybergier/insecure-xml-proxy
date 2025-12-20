@@ -1,7 +1,7 @@
 import * as Codec from './codec.js';
 
 export function isAsset(request) {
-  const kConfirm = '/asset';
+  const kConfirm = '/proxy/asset';
   const requestURL = new URL(request.url);
   const requestPath = requestURL.pathname;
   return requestPath.startsWith(kConfirm) || false;

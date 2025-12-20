@@ -1,13 +1,16 @@
 import * as Feed  from './feed.js';
 import * as Asset from './asset.js';
 import * as Submit from './submit.js';
+import * as NotFound from './notfound.js';
 
 export async function route(request, env, ctx) {
   const requestURL = new URL(request.url);
   
   // TODO: Check for key parameter to authenticate
   
-  if        (Feed.isFeed(request))            {
+  if (NotFound.isNotFound(request))           {
+    return NotFound.getNotFound(request);
+  } else if (Feed.isFeed(request))            {
     console.log(`[router.js] Feed.getFeed()`);
     return Feed.getFeed(request, env, ctx);
   } else if (Asset.isAsset(request))          { 

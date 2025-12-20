@@ -1,7 +1,7 @@
 import * as Codec from './codec.js';
 
 export function isFeed(request) {
-  const kConfirm = '/feed';
+  const kConfirm = '/proxy/feed';
   const requestURL = new URL(request.url);
   const requestPath = requestURL.pathname;
   return requestPath.startsWith(kConfirm) || false;
@@ -35,7 +35,7 @@ export async function getFeed(request, env, ctx) {
   const originalXML = await response.text();
   
   const rewrittenXML = originalXML.replace(searchPattern, (match) => {
-    return Codec.encode(request.url, match, "/asset");
+    return Codec.encode(request.url, match, "/proxy/asset");
   });
   
   const headers = new Headers(response.headers);

@@ -34,10 +34,10 @@ export function decode(requestURLString) {
   // so splitting this is safe from parameters.
   const pathComponents = requestURL.pathname.split('/'); 
   
-  // Path: /asset/ENCODED_STRING/file.mp3
+  // Path: /proxy/asset/ENCODED_STRING/file.mp3
   // Components: ["", "asset", "ENCODED_STRING", "file.mp3"]
   // The encoded string is always at index 2 (if the path is /asset/...)
-  const encodedTarget = pathComponents[2];
+  const encodedTarget = pathComponents[3];
   if (!encodedTarget) {
     console.error(`[codec.decode] invalid pathComponents`);
     return null;
