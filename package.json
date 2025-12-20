@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "stage": "node ./src/_node-stage.js",
-    "prod": "node ./src/_node-stage.js"
+    "prod": "node ./src/_node-prod.js"
   }
 }
