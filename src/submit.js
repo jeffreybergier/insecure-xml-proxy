@@ -1,4 +1,4 @@
-import * as Codec from './codec';
+import * as Codec from './codec.js';
 
 export function isSubmit(request) {
   const kConfirm = '/submit';

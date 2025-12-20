@@ -2,7 +2,8 @@
 Insecure Proxy for RSS Feeds
 
 
-## Example URLs
-/feed?url=http://theverge.com/rss/index.xml
-/feed?url=https://feeds.megaphone.fm/vergecast
-/asset?url=https://platform.theverge.com/wp-content/uploads/sites/2/2025/01/verge-rss-large_80b47e.png?w=150&h=150&crop=1
+## VPS
+https://www.digitalocean.com/community/tutorials/how-to-install-nginx-on-debian-10
+https://www.digitalocean.com/community/tutorials/how-to-set-up-a-node-js-application-for-production-on-debian-10
+https://nginx.org/en/docs/http/server_names.html
+https://pm2.keymetrics.io/docs/usage/startup/

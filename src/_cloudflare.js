@@ -1,4 +1,4 @@
-import * as Router  from './router';
+import * as Router  from './router.js';
 
 export default {
   async fetch(request, env, ctx) {

@@ -1,0 +1,9 @@
+{
+  "name": "legacy-xml-proxy",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "stage": "node ./src/_node-stage.js",
+    "prod": "node ./src/_node-stage.js"
+  }
+}

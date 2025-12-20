@@ -1,4 +1,4 @@
-import * as Codec from './codec';
+import * as Codec from './codec.js';
 
 export function isFeed(request) {
   const kConfirm = '/feed';
@@ -19,7 +19,6 @@ export async function getFeed(request, env, ctx) {
 
   let response;
   try {
-    console.log(`[feed.js] fetch(${targetURLString})`);
     response = await fetch(targetURLString);
   } catch (error) {
     console.error(`[feed.js] fetch() ${error.message}`);
@@ -35,15 +34,14 @@ export async function getFeed(request, env, ctx) {
   console.log(`[feed.js] response.text()`);
   const originalXML = await response.text();
   
-  console.log(`[feed.js] originalXML.replace()`);
   const rewrittenXML = originalXML.replace(searchPattern, (match) => {
     return Codec.encode(request.url, match, "/asset");
   });
   
   const headers = new Headers(response.headers);
   headers.delete('Content-Length');
+  headers.delete('Content-Encoding');
   
-  console.log(`[feed.js] return ${JSON.stringify(Object.fromEntries(headers), null, 2)}`);
   return new Response(rewrittenXML, {
     status: response.status,
     headers: headers

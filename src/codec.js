@@ -1,6 +1,5 @@
 
 export function encode(requestURLString, targetURLString, endpoint) {
-  console.log(`[codec.encode] encode ${targetURLString}`);
   const requestURL = new URL(requestURLString);
   const targetURL = new URL(targetURLString);
   if (!targetURL || !requestURL) {
@@ -20,12 +19,11 @@ export function encode(requestURLString, targetURLString, endpoint) {
   const protocol = "http://";
   const serverOrigin = requestURL.host;
   const encoded = `${protocol}${serverOrigin}${endpoint}/${encodedTarget}/${fileName}`;
-  console.log(`[codec.encode] encode ${encoded}`);
+  console.log(`[codec.encode] ${targetURLString}`);
   return encoded;
 }
 
 export function decode(requestURLString) {
-  console.log(`[codec.decode] ${requestURLString}`);
   const requestURL = new URL(requestURLString);
   if (!requestURL) {
     console.error(`[codec.encode] invalid URL ${requestURLString}`);
@@ -48,7 +46,7 @@ export function decode(requestURLString) {
   try {
     const base64Encoded = decodeURIComponent(encodedTarget);
     const targetURLString = atob(base64Encoded);
-    console.log(`[codec.decode] decoded ${targetURLString}`);
+    console.log(`[codec.decode] ${targetURLString}`);
     return targetURLString;
   } catch (error) {
     console.error(`[codec.decode] error ${error.message}`);
