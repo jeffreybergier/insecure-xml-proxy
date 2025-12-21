@@ -1,26 +1,9 @@
-import * as Feed  from './feed.js';
-import * as Asset from './asset.js';
-import * as Submit from './submit.js';
-import * as NotFound from './notfound.js';
+import * as Proxy  from './proxy.js';
+import * as Routes from './allroutes.js';
 
 export async function route(request, env, ctx) {
-  const requestURL = new URL(request.url);
-  
-  // TODO: Check for key parameter to authenticate
-  
-  if (NotFound.isNotFound(request))           {
-    return NotFound.getNotFound(request);
-  } else if (Feed.isFeed(request))            {
-    console.log(`[router.js] Feed.getFeed()`);
-    return Feed.getFeed(request, env, ctx);
-  } else if (Asset.isAsset(request))          { 
-    console.log(`[router.js] Asset.getAsset()`);
-    return Asset.getAsset(request, env, ctx);
-  } else if (Submit.isSubmit(request))        {
-    console.log(`[router.js] Submit.getPage()`);
-    return Submit.getPage(request);
-  }
-  
-  console.log(`[router.js] Submit.getForm()`);
-  return Submit.getForm()
+  Routes.AUTH_LOAD(env);
+  const proxyResponse = await Proxy.getProxyResponse(request);
+  if (proxyResponse) return proxyResponse;
+  return Routes.errorNotFound((new URL(request.url).pathname));
 }
