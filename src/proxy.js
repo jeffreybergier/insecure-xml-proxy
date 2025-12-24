@@ -117,6 +117,8 @@ function encode(requestURLString, targetURLString, endpoint, authorizedAPIKey) {
   const protocol = "http://";
   const serverOrigin = requestURL.host;
   const encoded = `${protocol}${serverOrigin}${endpoint}/${encodedTarget}/${fileName}?key=${authorizedAPIKey}`;
+  
+  // TODO: Remove the excess logging
   console.log(`[proxy.encode] ${targetURLString}`);
   return encoded;
 }
@@ -183,7 +185,7 @@ export async function getFeed(request, authorizedAPIKey) {
   const originalXML = await response.text();
   
   // 1. Find URLs for specific assets and replace them with /asset URLs
-  const searchPattern = /(https?:\/\/[^\s"']*\.(?:jpg|jpeg|gif|png|webm|mp3|aac)[^\s"']*)/gi;
+  const searchPattern = /(https?:\/\/[^\s"'<>]*\.(?:jpg|jpeg|gif|png|webm|mp3|aac)[^\s"'<>]*)/gi;
   var rewrittenXML = originalXML.replace(searchPattern, (match) => {
     return encode(request.url, match, Routes.Proxy.asset, authorizedAPIKey);
   });
