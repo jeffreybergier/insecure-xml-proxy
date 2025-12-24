@@ -158,6 +158,7 @@ export async function getFeed(request, authorizedAPIKey) {
   const requestURL = new URL(request.url);
   const proxyOrigin = requestURL.origin;
   const targetURLString = decode(request.url);
+  const xmlSafeURL = request.url.replace(/&/g, '&amp;');
   
   if (!targetURLString) {
     console.error(`[proxy.feed] Failed to decode URL from: ${request.url}`);
@@ -188,9 +189,14 @@ export async function getFeed(request, authorizedAPIKey) {
   });
   
   // 2. Find the itunes:new tag and replace it with this URL
-  const newFeedUrlPattern = /<itunes:new-feed-url>.*?<\/itunes:new-feed-url>/gi;
-  const xmlSafeURL = request.url.replace(/&/g, '&amp;');
+  const newFeedUrlPattern = /<itunes:new-feed-url>.*?<\/itunes:new-feed-url>/i;
   rewrittenXML = rewrittenXML.replace(newFeedUrlPattern, `<itunes:new-feed-url>${xmlSafeURL}</itunes:new-feed-url>`);
+  
+  // 3. Find RSS ATOM self URL
+  const atomSelfPattern = /<link\s+rel="self"\s+type="([^"]+)"\s+href="[^"]+"\s*\/>/i;
+  rewrittenXML = rewrittenXML.replace(atomSelfPattern, (match, type) => {
+    return `<link rel="self" type="${type}" href="${xmlSafeURL}" />`;
+  });
   
   const headers = new Headers(response.headers);
   headers.delete('Content-Length');
