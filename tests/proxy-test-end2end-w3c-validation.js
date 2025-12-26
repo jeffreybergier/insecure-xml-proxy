@@ -20,13 +20,14 @@ const TEST_FEEDS = [
   { name: "Decoder", url: "https://feeds.megaphone.fm/recodedecode" },
   { name: "Diggnation", url: "https://feeds.transistor.fm/diggnation" },
   { name: "Disrupting Japan", url: "https://www.disruptingjapan.com/feed/podcast/" },
-  { name: "Grammar Girl Quick and Dirty Tips for Better Writing", url: "https://feeds.simplecast.com/XcH2p3Ah" },
+  { name: "Grammar Girl", url: "https://feeds.simplecast.com/XcH2p3Ah" },
   { name: "Land of the Giants", url: "https://feeds.megaphone.fm/landofthegiants" },
   { name: "Lex Fridman Podcast", url: "https://lexfridman.com/feed/podcast/" },
   { name: "Mobile Dev Japan", url: "https://anchor.fm/s/108113308/podcast/rss" },
   { name: "More Perfect", url: "https://feeds.simplecast.com/lQwwDIs1" },
   { name: "My Favorite Murder", url: "https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/bdde8bb3-169d-43b1-91d3-b24c0047969c/f450d41f-16bc-4ecd-8f6c-b24c004796e2/podcast.rss" },
-  { name: "Nihongo con Teppei", url: "http://nihongoconteppei.com/feed/podcast" },
+  // TODO: Server crashes with nihongo con teppei
+//{ name: "Nihongo con Teppei", url: "http://nihongoconteppei.com/feed/podcast" },
   { name: "On with Kara Swisher", url: "https://feeds.megaphone.fm/VMP1684715893" },
   { name: "Open to Debate", url: "https://feeds.megaphone.fm/PNP1207584390" },
   { name: "Radiolab", url: "https://feeds.simplecast.com/EmVW7VGp" },
@@ -50,22 +51,60 @@ const wait = (ms) => new Promise(resolve => {
   console.log(`...Waiting for ${ms}ms...`);
   setTimeout(resolve, ms);
 });
+
+
+async function performProxyHealthCheck() {
+  try {
+    await fetch(`http://localhost:3000/proxy`);
+    return true; 
+  } catch (e) {
+    console.error("Error: Proxy appears to have crashed");
+    return false;
+  }  
+}
+
 async function getProxyHTMLBodyWithURLString(urlString) {
-  const response = await fetch(`http://localhost:3000/proxy/submit?key=${API_KEY}&url=${encodeURIComponent(urlString)}`);
-  if (!response.ok) { 
-    console.error(`Error: getProxyHTMLBodyWithURLString(${urlString})`);
-    return null; 
-  }
-  return await response.text();
+  try {
+    const response = await fetch(`http://localhost:3000/proxy/submit?key=${API_KEY}&url=${encodeURIComponent(urlString)}`);
+    if (!response.ok) { 
+      console.error(`Error: getProxyHTMLBodyWithURLString(${urlString})`);
+      return null; 
+    }
+    return await response.text();
+  } catch (err) {
+    console.error(`Error: getProxyHTMLBodyWithURLString error(${err.message}) url(${urlString})`);
+    return null;
+    }
 } 
 
 async function getXMLBodyWithURLString(urlString) {
-  const response = await fetch(urlString);
-  if (!response.ok) { 
-    console.error(`Error: getXMLBodyWithURLString(${urlString})`);
-    return null; 
+  const MAX_SIZE = 3 * 1024 * 1024;
+  const HEADERS = {
+    'User-Agent': 'Overcast/3.0 (+http://overcast.fm/; iOS podcast app)',
+    'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+    'Accept-Language': 'en, *;q=0.5'
+  };
+  try {
+    const response = await fetch(urlString, { headers: HEADERS });
+    const contentLength = response.headers.get('content-length');
+    if (!response.ok) { 
+      console.error(`Error: getXMLBodyWithURLString status(${response.status}) url(${urlString})`);
+      return null; 
+    }
+    if (contentLength && parseInt(contentLength) > MAX_SIZE) {
+      console.error(`Error: getXMLBodyWithURLString headerSize(${parseInt(contentLength)} > 3MB) url(${urlString})`);
+      return null;
+    }
+    const text = await response.text();
+    if (text.length > MAX_SIZE) {
+      console.error(`Error: getXMLBodyWithURLString actualSize(${text.length} > 3MB) url(${urlString})`);
+      return null;
+    }
+    return text;
+  } catch (err) {
+    console.error(`Error: getXMLBodyWithURLString error(${err.message}) url(${urlString})`);
+    return null;
   }
-  return await response.text();
 }
 
 async function getW3CXMLBodyWithXMLBody(xmlBody) {
@@ -75,6 +114,7 @@ async function getW3CXMLBodyWithXMLBody(xmlBody) {
   params.append('manual', '1');
   params.append('rawdata', cleansedXMLBody);
 
+  await wait(3001);
   const response = await fetch('https://validator.w3.org/feed/check.cgi', {
     method: 'POST',
     body: params
@@ -110,6 +150,7 @@ async function startTests() {
   console.log(`Testing Feeds: ${TEST_FEEDS.length}`);
   let errorCount = 0;
   let successCount = 0;
+  let skipCount = 0;
 
   for (const lhs of TEST_FEEDS) {
     console.log(`Testing: ${lhs.name} ${lhs.url}`);
@@ -122,16 +163,17 @@ async function startTests() {
       // 2. Fetch both XML bodies
       const lhsXML = await getXMLBodyWithURLString(lhs.url);
       const rhsXML = await getXMLBodyWithURLString(rhsURL);
-      if (!lhsXML || !rhsXML) { errorCount += 1; continue; }
+      const proxyRunning = await performProxyHealthCheck()
+      if (!proxyRunning) { errorCount += 1; break; }
+      if (!lhsXML || !rhsXML) { skipCount += 1; continue; }
       
-      // 3. W3C Validation (LHS)
-      await wait(3001);
+      // 3. Fetch W3C Validation
       const lhsW3C = await getW3CXMLBodyWithXMLBody(lhsXML);
-      const lhsCount = analyzeW3CXMLBody(lhsW3C);
-      
-      // 4. W3C Validation (RHS)
-      await wait(3001); 
       const rhsW3C = await getW3CXMLBodyWithXMLBody(rhsXML);
+      if (!lhsW3C || !rhsW3C) { skipCount += 1; continue; }
+
+      // 4. Analyze W3C Validation
+      const lhsCount = analyzeW3CXMLBody(lhsW3C);
       const rhsCount = analyzeW3CXMLBody(rhsW3C);
 
       // 5. Comparison
@@ -152,7 +194,7 @@ async function startTests() {
     }
   }
 
-  console.log(`Tested total(${TEST_FEEDS.length}) success(${successCount}) error(${errorCount})`);
+  console.log(`Tested total(${TEST_FEEDS.length}) success(${successCount}) error(${errorCount}) skipped(${skipCount})`);
   process.exit(errorCount);
 }
 

@@ -41,6 +41,6 @@ jobs:
       - name: Run Feed Comparison Tests
         run: |
           echo "Starting W3C Validation Comparison..."
-          node tests/proxy-test-integration.js
+          node tests/proxy-test-end2end-w3c-validation.js
         env: 
           VALID_KEY: "AbAbAb"
