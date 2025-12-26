@@ -1,0 +1,46 @@
+name: proxy-test-end2end-w3c-validation
+
+on:
+  push:
+    branches: [ main, stage ]
+  pull_request:
+    branches: [ main, stage ]
+
+jobs:
+  proxy-test-end2end-w3c-validation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Matches modern standards
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Start Proxy Server
+        # We use '&' to run the server in the background so the action can continue
+        # We also wait a few seconds for the server to actually boot up
+        run: |
+          npm start & 
+          sleep 5 
+        env: 
+          VALID_KEYS: '["AbAbAb"]'
+
+      - name: Verify Server is Live
+        run: |
+          curl --silent --fail http://localhost:3000/proxy > /dev/null || exit 1
+          echo "Proxy Server is up and reachable!"
+
+      # This is where you will eventually put your CI validation script
+      - name: Run Feed Comparison Tests
+        run: |
+          echo "Starting W3C Validation Comparison..."
+          node tests/proxy-test-end2end-w3c-validation.js
+        env: 
+          VALID_KEY: "AbAbAb"

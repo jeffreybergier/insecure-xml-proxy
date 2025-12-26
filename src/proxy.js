@@ -117,6 +117,8 @@ function encode(requestURLString, targetURLString, endpoint, authorizedAPIKey) {
   const protocol = "http://";
   const serverOrigin = requestURL.host;
   const encoded = `${protocol}${serverOrigin}${endpoint}/${encodedTarget}/${fileName}?key=${authorizedAPIKey}`;
+  
+  // TODO: Remove the excess logging
   console.log(`[proxy.encode] ${targetURLString}`);
   return encoded;
 }
@@ -158,6 +160,7 @@ export async function getFeed(request, authorizedAPIKey) {
   const requestURL = new URL(request.url);
   const proxyOrigin = requestURL.origin;
   const targetURLString = decode(request.url);
+  const xmlSafeURL = request.url.replace(/&/g, '&amp;');
   
   if (!targetURLString) {
     console.error(`[proxy.feed] Failed to decode URL from: ${request.url}`);
@@ -177,13 +180,24 @@ export async function getFeed(request, authorizedAPIKey) {
     return response;
   }
   
+  // Download the feed
   // TODO: Add cache-control
-  const searchPattern = /(https?:\/\/[^\s"']*\.(?:jpg|jpeg|gif|png|webm|mp3|aac)[^\s"']*)/gi;
-  console.log(`[proxy.feed] response.text()`);
   const originalXML = await response.text();
   
-  const rewrittenXML = originalXML.replace(searchPattern, (match) => {
+  // 1. Find URLs for specific assets and replace them with /asset URLs
+  const searchPattern = /(https?:\/\/[^\s"'<>]*\.(?:jpg|jpeg|gif|png|webm|mp3|aac)[^\s"'<>]*)/gi;
+  var rewrittenXML = originalXML.replace(searchPattern, (match) => {
     return encode(request.url, match, Routes.Proxy.asset, authorizedAPIKey);
+  });
+  
+  // 2. Find the itunes:new tag and replace it with this URL
+  const newFeedUrlPattern = /<itunes:new-feed-url>.*?<\/itunes:new-feed-url>/i;
+  rewrittenXML = rewrittenXML.replace(newFeedUrlPattern, `<itunes:new-feed-url>${xmlSafeURL}</itunes:new-feed-url>`);
+  
+  // 3. Find RSS ATOM self URL
+  const atomSelfPattern = /<link\s+rel="self"\s+type="([^"]+)"\s+href="[^"]+"\s*\/>/i;
+  rewrittenXML = rewrittenXML.replace(atomSelfPattern, (match, type) => {
+    return `<link rel="self" type="${type}" href="${xmlSafeURL}" />`;
   });
   
   const headers = new Headers(response.headers);
