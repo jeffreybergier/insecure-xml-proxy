@@ -7,6 +7,14 @@
 ## In a new terminal window you can also run wrangler commands like
 ### docker-compose exec wrangler-dev npm install fast-xml-parser
 
+## To Login Run
+### docker-compose exec wrangler-dev npx wrangler login
+
+## Paste the URL into browser and auth
+## Login will fail because safari can't access the docker for login
+## Copy the URL and then in another terminal run
+### docker-compose exec wrangler-dev curl "INSERT URL HERE"
+
 services:
   wrangler-dev:
     build: .
