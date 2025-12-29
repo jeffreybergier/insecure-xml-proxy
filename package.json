@@ -6,6 +6,7 @@
     "start": "node ./src/_node-boot.js"
   },
   "dependencies": {
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "fast-xml-parser": "^5.3.3"
   }
 }
