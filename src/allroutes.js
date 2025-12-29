@@ -2,7 +2,10 @@
 export let VALID_KEYS = null;
 
 export function AUTH_LOAD(env) {
-  if (VALID_KEYS) { return; }
+  if (VALID_KEYS) { 
+    console.log(`[routes.auth] Recycled: ${VALID_KEYS.size}`);
+    return; 
+  }
   try {
     VALID_KEYS = new Set(env.VALID_KEYS);
     console.log(`[routes.auth] Loaded: ${VALID_KEYS.size}`);
