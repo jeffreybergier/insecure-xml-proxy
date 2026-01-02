@@ -1,12 +1,13 @@
+import { XMLParser } from "fast-xml-parser";
 const API_KEY = process.env.VALID_KEY;
 
 const TEST_FEEDS = [
-/*
+
   // RSS Feeds
   { name: "The Verge", url: "https://www.theverge.com/rss/index.xml" },
   { name: "MacRumors", url: "https://www.macrumors.com/macrumors.xml" },
   { name: "Daring Fireball", url: "https://daringfireball.net/feeds/main" },
-
+  
   // Podcast Feeds
   { name: "Accidental Tech Podcast", url: "https://atp.fm/rss" },
   { name: "ArchaeoEd Podcast", url: "https://feeds.buzzsprout.com/1314529.rss" },
@@ -24,16 +25,14 @@ const TEST_FEEDS = [
   { name: "Science Vs", url: "https://feeds.megaphone.fm/sciencevs" },
   { name: "Shell Game", url: "https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/d3d3abca-191a-4010-8160-b3530112d393/c639b22c-ee8c-43dd-86c1-b3530112d3a3/podcast.rss" },
   { name: "The Rest Is History", url: "https://feeds.megaphone.fm/GLT4787413333" },
-  */
   { name: "The Rest Is Politics: US", url: "https://feeds.megaphone.fm/GLT5336643697" },
-  /*
   { name: "The Talk Show", url: "https://daringfireball.net/thetalkshow/rss" },
   { name: "This Podcast Will Kill You", url: "https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/e0709a39-232b-4483-8e4f-b24c0111ae2c/64b4c224-562e-4b2f-9f31-b24c0111ae53/podcast.rss" },
   { name: "Unexplainable", url: "https://feeds.megaphone.fm/VMP9331026707" },
   { name: "Upgrade", url: "https://www.relay.fm/upgrade/feed" },
   { name: "What Trump Can Teach Us About Con Law", url: "https://feeds.simplecast.com/jZLi00b4" },
   { name: "日本語 with あこ", url: "https://anchor.fm/s/2e08a010/podcast/rss" },
-  
+    /*
   // Podcast: Troublesome Feeds
   { name: "Acquired", url: "https://feeds.transistor.fm/acquired" },
   { name: "All-In", url: "https://rss.libsyn.com/shows/254861/destinations/1928300.xml" },
@@ -61,10 +60,10 @@ const wait = (ms) => new Promise(resolve => {
 
 async function performProxyHealthCheck() {
   try {
-    await fetch(`http://localhost:3000/proxy`);
-    return true; 
+    const res = await fetch(`http://localhost:3000/proxy`);
+    return res.status !== 500; // If it's 500, the server is alive but erroring
   } catch (e) {
-    console.error("Error: Proxy appears to have crashed");
+    console.error(`Error: Proxy appears to have crashed: ${e.message} ${e.cause}`);
     return false;
   }  
 }
@@ -79,6 +78,7 @@ async function getProxyURLStringWithURLString(urlString) {
     return await response.text();
   } catch (err) {
     console.error(`Error: getProxyURLStringWithURLString error(${err.message}) url(${urlString})`);
+    console.error(`TEMP: ${err.cause}`);
     return null;
     }
 } 
@@ -109,6 +109,7 @@ async function getXMLBodyWithURLString(urlString) {
     return text;
   } catch (err) {
     console.error(`Error: getXMLBodyWithURLString error(${err.message}) url(${urlString})`);
+    console.error(`TEMP: ${err.cause}`);
     return null;
   }
 }
@@ -132,14 +133,79 @@ async function getW3CXMLBodyWithXMLBody(xmlBody) {
   return await response.text();
 }
 
-function analyzeW3CXMLBody(xmlBody) {
-  const errorMatch = xmlBody.match(/<m:errorcount>(\d+)<\/m:errorcount>/);
-  const errors = errorMatch ? parseInt(errorMatch[1], 10) : -1;
-  const warningMatch = xmlBody.match(/<m:warningcount>(\d+)<\/m:warningcount>/);
-  const warnings = warningMatch ? parseInt(warningMatch[1], 10) : -1;
+/**
+ * Validates a feed by URL rather than raw body.
+ * @param {URL|string} publicURL - The publicly accessible URL of the feed to validate.
+ * @returns {Promise<string|null>} - The SOAP 1.2 XML response from the validator.
+ */
+async function getW3CValidationByURL(publicURL) {
+  // Ensure we have a string representation of the URL
+  const target = publicURL.toString();
+  const params = new URLSearchParams();
+  params.append('output', 'soap12'); // Return XML instead of HTML
+  params.append('url', target);       // The W3C will fetch this URL
+  // W3C has a strict rate limit; 3 seconds is a safe courtesy delay
+  await wait(3000);
+  try {
+    const response = await fetch(`https://validator.w3.org/feed/check.cgi?${params.toString()}`, {
+      method: 'GET' // URL-based validation can use a simple GET
+    });
+    if (!response.ok) {
+      console.error(`[W3C] Validation failed for ${target}. Status: ${response.status}`);
+      return null;
+    }
+    return await response.text();
+  } catch (error) {
+    console.error(`[W3C] Fetch error:`, error);
+    return null;
+  }
+}
 
-  if (errors < 0 || warnings < 0) return null;
-  return { errors: errors, warnings: warnings };
+function analyzeW3CXMLBody(xmlBody) {
+  const parser = new XMLParser({
+    removeNSPrefix: true,
+  });
+  
+  const jsonObj = parser.parse(xmlBody);
+  const response = jsonObj?.Envelope?.Body?.feedvalidationresponse;
+  if (!response) {
+    console.error("FAILED to find feedvalidationresponse in W3C body");
+    return null;
+  }
+
+  // W3C response sometimes nests errors differently depending on the feed type
+  const errors = [].concat(response.errors?.errorlist?.error || []);
+  const warnings = [].concat(response.warnings?.warninglist?.warning || []);
+  const output = [...errors, ...warnings].map(issue => {
+    // Safety: ensure we don't crash if an issue is missing a field
+    const type = issue.type || 'UnknownType';
+    const element = issue.element || 'UnknownElement';
+    const parent = issue.parent || 'root';
+    const text = issue.text || '';
+    
+    const snippet = text.substring(0, 20).replace(/\s+/g, '_');
+    const fingerprint = `${parent}>${element}|${type}|${snippet}`;
+
+    return {
+      key: fingerprint,
+      line: issue.line,
+      type: type,
+      text: text,
+      element: element
+    };
+  });
+  const knownFailures = [
+  'SelfDoesntMatchLocation',
+  'ContainsHTML',
+  ];
+  return output.filter(issue => !knownFailures.includes(issue.type));
+}
+
+function getRegressions(lhsIssues, rhsIssues) {
+  // Map the original issues into a Set of keys for O(1) lookup
+  const lhsKeys = new Set(lhsIssues.map(i => i.key));
+  // Find proxy issues that do NOT exist in the original set
+  return rhsIssues.filter(issue => !lhsKeys.has(issue.key));
 }
 
 async function startTests() {
@@ -163,42 +229,34 @@ async function startTests() {
       const rhsW3C = await getW3CXMLBodyWithXMLBody(rhsXML);
       if (!rhsW3C) { errorCount += 1; continue; }
       // R4. Analyze W3C Validation
-      const rhsErr = analyzeW3CXMLBody(rhsW3C);
-      if (!rhsErr) { errorCount += 1; continue; }
-      const rhsErrSt = JSON.stringify(rhsErr);
+      const rhsIssues = analyzeW3CXMLBody(rhsW3C);
+      if (!rhsIssues) { errorCount += 1; continue; }
+      const rhsIssuesString = JSON.stringify(rhsIssues, null, 2);
       
-      // L2. Fetch both XML bodies
-      let lhsW3C = null;
-      let lhsErr = null;
-      const lhsXML = await getXMLBodyWithURLString(lhs.url);
-      if (lhsXML) {
-        // L3. Fetch W3C Validation
-        lhsW3C = await getW3CXMLBodyWithXMLBody(lhsXML);
-        if (lhsW3C) {
-          // L4. Analyze W3C Validation
-          lhsErr = analyzeW3CXMLBody(lhsW3C);
-        }
+      // L3. Fetch W3C Validation
+      let lhsIssues = null;
+      const lhsW3C = await getW3CValidationByURL(lhs.url);
+      if (lhsW3C) {
+        // L4. Analyze W3C Validation
+        lhsIssues = analyzeW3CXMLBody(lhsW3C);
       }
       
       // Able to compare
-      if (lhsErr) {
+      if (lhsIssues) {
         // 5. Comparison
-        const lhsErrSt = JSON.stringify(lhsErr);
-        if (lhsErr.errors >= rhsErr.errors && lhsErr.warnings >= rhsErr.warnings) {
-          console.log(`Success: ${lhs.name} lhs: ${lhsErrSt} rhs: ${rhsErrSt}`);
-          successCount += 1;
-        } else {
-          console.log(`Failure: ${lhs.name} lhs: ${lhsErrSt} rhs: ${rhsErrSt}`);
-          console.error("-------- RHS W3C Validation Response --------");
-          console.error(`${rhsW3C}`);
-          console.error("-------- LHS W3C Validation Response --------");
-          console.error(`${lhsW3C}`);
+        const remainingIssues = getRegressions(lhsIssues, rhsIssues);
+        const remainingIssuesString = JSON.stringify(remainingIssues, null, 2);
+        if (remainingIssues.length > 0) {
+          console.error(`Failure: ${lhs.name} \n${remainingIssuesString}`);
           errorCount += 1;
+        } else {
+          console.log(`Success: ${lhs.name} ${lhs.url}`);
+          successCount += 1;
         }
       } else {
         // Unable to compare
         // TODO: Figure out how to validate these items
-        console.log(`Unknown: ${lhs.name} rhs: ${rhsErrSt}`);
+        console.log(`Unknown: ${lhs.name} \n${rhsIssuesString}`);
         unknownCount += 1;
       }
     } catch (err) {

@@ -165,7 +165,7 @@ function encode(targetURL,
   if (!(targetURL  instanceof URL)
    || !(requestURL instanceof URL)
    || typeof authorizedAPIKey !== "string") 
-  { throw new Error("Parameter Error: targetURL, requestURL, targetOption, authorizedAPIKey"); }
+  { throw new Error(`Parameter Error: targetURL(${targetURL}), requestURL(${requestURL}), targetOption(${targetOption}), authorizedAPIKey(${authorizedAPIKey})`); }
   
   // get the target filename
   const pathComponents = targetURL.pathname.split('/');
@@ -229,7 +229,7 @@ export async function getFeed(targetURL,
    || typeof authorizedAPIKey !== "string") 
    { throw new Error("Parameter Error: targetURL, requestURL, requestHeaders, requestMethod, authorizedAPIKey"); }
   
-  let requestHeaders = sanitized(_requestHeaders);
+  let requestHeaders = sanitizedRequestHeaders(_requestHeaders);
   if (requestMethod !== "GET") {
     // Bail out immediately if we are 
     // not proxying a normal GET request
@@ -240,6 +240,63 @@ export async function getFeed(targetURL,
     });
   }
   
+  /**
+   * CDATA-aware URL patcher with Predicate
+   * @param {Object} parent - Parent object
+   * @param {string} key - Property name
+   * @param {number} option - The Option enum
+   * @param {Function} where - (Optional) (parent) => boolean
+   */
+  function XML_encodeURL(parent, key, option, where) {
+    if (!parent || !parent[key]) return;
+    const target = parent[key];
+    // 1. Handle Array Case (Recursive)
+    if (Array.isArray(target)) {
+      target.forEach((_, index) => {
+        // We pass the array as the parent and the index as the key
+        X_setURL(target, index, option, where);
+      });
+      return;
+    }
+    // 2. Apply Predicate (where clause)
+    // We pass 'parent' so the caller can check siblings or attributes
+    if (where && !where(parent)) return;
+    const original = target;
+    // 3. Extract raw string (handle CDATA vs String)
+    const rawValue = (typeof original === "object" && original.__cdata) 
+                     ? original.__cdata 
+                     : original;
+    if (typeof rawValue !== "string") return;
+    // 4. Parse and Trim (Fixes Arms Control Wonk whitespace)
+    const rawValueURL = URL.parse(rawValue.trim());
+    if (!rawValueURL) return;
+    // 5. Encode
+    const resultURL = encode(rawValueURL, requestURL, option, authorizedAPIKey);
+    if (!(resultURL instanceof URL)) return;
+    const finalString = resultURL.toString();
+    // 6. Re-wrap in original format
+    parent[key] = (typeof original === "object" && "__cdata" in original)
+      ? { "__cdata": finalString }
+      : finalString;
+  }
+
+  // TODO: Delete these
+  // 1. Extracts the string regardless of whether it's CDATA or a plain string
+  function X_getCD(val) {
+    if (!val) return null;
+    if (typeof val === "string") return val;
+    if (val.__cdata) return val.__cdata;
+    return null;
+  }
+  
+  // 2. Wraps the new value back into the original format (CDATA or String)
+  function X_setCD(originalVal, newVal) {
+    return (typeof originalVal === "object" && "__cdata" in originalVal)
+          ? { "__cdata": newVal }
+          : newVal;
+  }
+  
+  console.log(`[proxy.feed] rewrite-start: ${targetURL.toString()}`);
   try {
     // 1. Download the original feed
     const response = await fetch(targetURL, {
@@ -251,6 +308,9 @@ export async function getFeed(targetURL,
       console.error(`[proxy.feed] fetch() response(${response.status})`);
       return response;
     }
+    
+    const timelimit = new Date();
+    timelimit.setMonth(timelimit.getMonth() - 6);
     const originalXML = await response.text();
     
     // 2. Create the XML Parser
@@ -263,103 +323,62 @@ export async function getFeed(targetURL,
     const builder = new XMLBuilder({ 
       ignoreAttributes: false, 
       format: true,
+      suppressBooleanAttributes: false,
       suppressEmptyNode: true,
       cdataPropName: "__cdata"
     });
     
     let xml = parser.parse(originalXML);
     const rssChannel = xml.rss?.channel;
+    // 3 Patch the Channel
     if (rssChannel) {
-      // 3 Patch the Channel
-      if (!Array.isArray(rssChannel.item)) rssChannel.item = (rssChannel.item) 
-                                                           ? [rssChannel.item] 
-                                                           : [];
       // 3.1 Replace itunes:new-feed-url
-      const itNewURL = URL.parse(rssChannel["itunes:new-feed-url"]);
-      if (itNewURL) rssChannel["itunes:new-feed-url"] = encode(itNewURL, 
-                                                               requestURL, 
-                                                               Option.feed,
-                                                               authorizedAPIKey)
-                                                              .toString();
-      
+      XML_encodeURL(rssChannel, "itunes:new-feed-url", Option.feed);
       // 3.2 Replace itunes:image
-      const itImageURL = URL.parse(rssChannel["itunes:image"]?.["@_href"]);
-      if (itImageURL) rssChannel["itunes:image"]["@_href"] = encode(itImageURL, 
-                                                                    requestURL, 
-                                                                    Option.asset,
-                                                                    authorizedAPIKey)
-                                                                   .toString();
-      // 3.3 Replace Link
-      const linkURL = URL.parse(rssChannel.link);
-      if (linkURL) rssChannel.link = encode(linkURL, 
-                                            requestURL, 
-                                            Option.asset,
-                                            authorizedAPIKey)
-                                           .toString();
-      // 3.4 Replace Link
-      // TODO: Investigate what to do if there multiples of these
-      const selfLink = (rssChannel["atom:link"]?.["@_rel"] === "self")
-                      ? rssChannel["atom:link"]
-                      : null;
-      const selfLinkURL = URL.parse(selfLink?.["@_href"]);
-      if (selfLinkURL) rssChannel["atom:link"]["@_href"] = encode(selfLinkURL, 
-                                                                  requestURL, 
-                                                                  Option.feed,
-                                                                  authorizedAPIKey)
-                                                                 .toString();
-      
-      
-      // 3.5 Remove items over 1 year old
-      const timelimit = new Date();
-      timelimit.setFullYear(timelimit.getFullYear() - 1);
+      XML_encodeURL(rssChannel["itunes:image"], "@_href", Option.asset);
+      // 3.3 Replace Links
+      XML_encodeURL(rssChannel, "link", Option.auto);
+      // 3.4 Replace Self Link
+      XML_encodeURL(rssChannel["atom:link"], "@_href", Option.feed, parent => {
+        return parent["@_rel"] === "self";
+      });
+      // 3.5 Replace the channel image
+      if (rssChannel.image) {
+        XML_encodeURL(rssChannel.image, "url", Option.asset);
+        XML_encodeURL(rssChannel.image, "link", Option.auto);
+      }
+      // 3.6 Remove items over 1 year old
       rssChannel.item = rssChannel.item.filter(item => {
         const pubDate = new Date(item.pubDate);
         return pubDate > timelimit;
       });
       
       // 4 Patch each item in the channel
+      if (!Array.isArray(rssChannel.item)) rssChannel.item = (rssChannel.item) 
+                                                     ? [rssChannel.item] 
+                                                     : [];
       rssChannel.item.forEach(item => {
         // 4.1 Replace the Link property
-        const linkURL = URL.parse(item.link);
-        if (linkURL) item.link = encode(linkURL, 
-                                        requestURL, 
-                                        Option.html,
-                                        authorizedAPIKey)
-                                       .toString();
+        XML_encodeURL(item, "link", Option.auto);
         // 4.2 Replace the itunes image url
-        const itImageURL = URL.parse(item["itunes:image"]?.["@_href"]);
-        if (itImageURL) item["itunes:image"]["@_href"] = encode(itImageURL, 
-                                                                requestURL, 
-                                                                Option.asset,
-                                                                authorizedAPIKey)
-                                                               .toString();
+        XML_encodeURL(item["itunes:image"], "@_href", Option.asset);
         // 4.3 Replace enclosure url
-        const enclosureURL = URL.parse(item.enclosure?.["@_url"]);
-        if (enclosureURL) item.enclosure["@_url"] = encode(enclosureURL, 
-                                                           requestURL, 
-                                                           Option.asset,
-                                                           authorizedAPIKey)
-                                                          .toString();
+        XML_encodeURL(item.enclosure, "@_url", Option.asset);
         // 4.4 TODO: Edit the Content tag as if it were HTML
       });
     }
     
     const rssFeed = xml.feed;
+    // 5 Patch the RSS feed
     if (rssFeed) {
-      // 5 Patch the RSS feed
-      if (!Array.isArray(rssFeed.entry)) rssFeed.entry = (rssFeed.entry) 
-                                                       ? [rssFeed.entry] 
-                                                       : [];
+      // 5.1 Proxy all of the link references
       if (!Array.isArray(rssFeed.link)) rssFeed.link = (rssFeed.link) 
                                                      ? [rssFeed.link] 
                                                      : [];
-
-      // 5.1 Proxy all of the link references
       rssFeed.link.forEach(link => {
         const linkURL = URL.parse(link["@_href"]);
         if (!linkURL) return;
         let option = Option.auto;
-        console.log(`TEMP ${JSON.stringify(link)}`)
         if (link["@_type"]?.toLowerCase().includes("html" )) option = Option.html;
         if (link["@_type"]?.toLowerCase().includes("xml"  )) option = Option.feed;
         if (link["@_type"]?.toLowerCase().includes("rss"  )) option = Option.feed;
@@ -374,27 +393,19 @@ export async function getFeed(targetURL,
       });
       
       // 5.2 replace logo and icon which are in the spec
-      const logoURL = URL.parse(rssFeed.logo);
-      if (logoURL) rssFeed.logo = encode(logoURL, 
-                                         requestURL, 
-                                         Option.asset,
-                                         authorizedAPIKey)
-                                        .toString();
-      const iconURL = URL.parse(rssFeed.icon);
-      if (iconURL) rssFeed.icon = encode(iconURL, 
-                                         requestURL, 
-                                         Option.asset,
-                                         authorizedAPIKey)
-                                        .toString();
-      // 5.3 Remove items over 1 month old
-      const timelimit = new Date();
-      timelimit.setMonth(timelimit.getMonth() - 1);
+      XML_encodeURL(rssFeed, "logo", Option.asset);
+      XML_encodeURL(rssFeed, "icon", Option.asset);
+      
+      // 6 Correct all of the entries
+      if (!Array.isArray(rssFeed.entry)) rssFeed.entry = (rssFeed.entry) 
+                                                 ? [rssFeed.entry] 
+                                                 : [];
       rssFeed.entry = rssFeed.entry.filter(item => {
         const updated = new Date(item.updated);
         return updated > timelimit;
       });
       
-      // 5.4 Patch each link entry
+      // 6.1 Patch each link entry
       rssFeed.entry.forEach(entry => {
         if (!Array.isArray(entry.link)) entry.link = (entry.link) 
                                                    ? [entry.link] 
@@ -404,7 +415,6 @@ export async function getFeed(targetURL,
           const linkURL = URL.parse(link["@_href"]);
           if (!linkURL) return;
           let option = Option.auto;
-          console.log(`TEMP ${JSON.stringify(link)}`)
           if (link["@_type"]?.toLowerCase().includes("html" )) option = Option.html;
           if (link["@_type"]?.toLowerCase().includes("xml"  )) option = Option.feed;
           if (link["@_type"]?.toLowerCase().includes("rss"  )) option = Option.feed;
@@ -418,17 +428,18 @@ export async function getFeed(targetURL,
                                  .toString();
         });
         
-        // 5.5 TODO: Edit the Content tag as if it were HTML
+        // 6.2 TODO: Edit the Content tag as if it were HTML
       });
     }
 
     // 4. Return the modified XML Response
     const rewrittenXML = builder.build(xml);
+    const rewrittenXMLSize = new TextEncoder().encode(rewrittenXML).length;
+    const responseHeaders = sanitizedResponseHeaders(response.headers);
+    responseHeaders.set('Content-Type', 'text/xml; charset=utf-8');
+    responseHeaders.set('Content-Length', rewrittenXMLSize);
     
-    const responseHeaders = new Headers(response.headers);
-    responseHeaders.delete('Content-Length');
-    responseHeaders.delete('Content-Encoding');
-    
+    console.log(`[proxy.feed] rewrite-done: ${targetURL.toString()} size: ${rewrittenXMLSize.toString()}`);
     return new Response(rewrittenXML, {
       status: response.status,
       headers: responseHeaders
@@ -448,11 +459,11 @@ function getAsset(targetURL,
    || !requestHeaders
    || !requestMethod
    || typeof authorizedAPIKey !== "string") 
-   { throw new Error("Parameter Error: targetURL, requestHeaders, requestMethod, authorizedAPIKey"); }
-   
-   const headers = sanitized(requestHeaders);
-   console.log(`[proxy.asset] passing through: ${targetURL.toString()}`);
-   
+  { throw new Error("Parameter Error: targetURL, requestHeaders, requestMethod, authorizedAPIKey"); }
+  
+  const headers = sanitizedRequestHeaders(requestHeaders);
+  console.log(`[proxy.asset] passing through: ${targetURL.toString()}`);
+  
   // TODO: Add cache-control
   return fetch(targetURL, {
     method: requestMethod,
@@ -461,7 +472,7 @@ function getAsset(targetURL,
   });
 }
 
-function sanitized(incomingHeaders) {
+function sanitizedRequestHeaders(incomingHeaders) {
   const forbidden = [
     'host',
     'connection',
@@ -472,7 +483,36 @@ function sanitized(incomingHeaders) {
     'trailer',
     'transfer-encoding',
     'upgrade',
-    'content-length'
+    'content-length',
+     // TODO: Debugging
+    'if-none-match',
+    'if-modified-since',
+  ];
+
+  const headers = new Headers();
+  for (const [key, value] of incomingHeaders.entries()) {
+    if (!forbidden.includes(key.toLowerCase())) {
+      headers.set(key, value);
+    }
+  }
+  
+  // Optional: Set a User-Agent so sites don't block you as a bot
+  if (!headers.has('user-agent')) {
+    headers.set('User-Agent', 'Overcast/3.0 (+http://overcast.fm/; iOS podcast app)');
+  }
+
+  return headers;
+}
+
+function sanitizedResponseHeaders(incomingHeaders) {
+  const forbidden = [
+    'content-length',
+    'content-encoding',
+    'transfer-encoding',
+    'connection',
+    'keep-alive',
+    'content-security-policy-report-only',
+    'content-security-policy',
   ];
 
   const headers = new Headers();
