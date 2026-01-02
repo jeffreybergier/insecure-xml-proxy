@@ -1,10 +1,8 @@
 name: proxy-test-end2end-w3c-validation
 
 on:
-  push:
-    branches: [ main, prod ]
   pull_request:
-    branches: [ main, prod ]
+    branches: [ prod ]
 
 jobs:
   proxy-test-end2end-w3c-validation:
