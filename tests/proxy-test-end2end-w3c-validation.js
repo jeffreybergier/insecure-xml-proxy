@@ -1,89 +1,56 @@
+import fs from "fs"; // Add this for file reading
 import { XMLParser } from "fast-xml-parser";
+
 const API_KEY = process.env.VALID_KEY;
+const OPML_PATH = "tests/proxy-test-feeds.opml";
+const TEST_FEEDS = loadFeedsFromOPML(OPML_PATH);
 
-const TEST_FEEDS = [
+/**
+ * Loads and parses the OPML file into a flat array of { name, url }
+ */
+function loadFeedsFromOPML(path) {
+  try {
+    const xmlData = fs.readFileSync(path, "utf8");
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_",
+    });
 
-  // RSS Feeds
-  { name: "The Verge", url: "https://www.theverge.com/rss/index.xml" },
-  { name: "MacRumors", url: "https://www.macrumors.com/macrumors.xml" },
-  { name: "Daring Fireball", url: "https://daringfireball.net/feeds/main" },
-  { name: "It's Nice That", url: "https://feeds2.feedburner.com/itsnicethat/SlXC" },
-  { name: "Nomadic Matt", url: "https://www.nomadicmatt.com/feed/" },
-  { name: "Xkcd", url: "https://xkcd.com/rss.xml" },
-  { name: "Vienna Support", url: "https://github.com/ViennaRSS/vienna-rss/discussions.atom" },
-  { name: "A Working Library", url: "https://aworkinglibrary.com/feed/index.xml" },
-  { name: "Vienna Developer Blog", url: "https://www.vienna-rss.com/feed.xml" },
-  { name: "Cool Hunting", url: "http://feeds.coolhunting.com/ch" },
-  { name: "BBC World News", url: "https://feeds.bbci.co.uk/news/world/rss.xml" },
-  { name: "Ars Technica", url: "https://feeds.arstechnica.com/arstechnica/index/" },
-  { name: "Astronomy Picture of the Day", url: "https://apod.nasa.gov/apod.rss" },
-  { name: "Colossal", url: "https://www.thisiscolossal.com/feed/" },
-  { name: "Craig Hockenberry", url: "https://furbo.org/feed" },
-  { name: "inessential", url: "https://inessential.com/xml/rss.xml" },
-  { name: "Jason Kottke", url: "http://feeds.kottke.org/main" },
-  { name: "Julia Evans", url: "https://jvns.ca/atom.xml" },
-  { name: "Manton Reece", url: "https://www.manton.org/feed.xml" },
-  { name: "Maurice Parker", url: "https://vincode.io/feed.xml" },
-  { name: "Michael Tsai", url: "https://mjtsai.com/blog/feed/" },
-  { name: "NetNewsWire Blog", url: "https://netnewswire.blog/feed.xml" },
-  { name: "One Foot Tsunami", url: "https://onefoottsunami.com/feed/atom/" },
-  { name: "Scripting News", url: "http://scripting.com/rss.xml" },
-  { name: "Six Colors", url: "https://feedpress.me/sixcolors?type=xml" },
-  { name: "RTINGS.com", url: "https://www.rtings.com/latest-rss" },
+    const jsonObj = parser.parse(xmlData);
+    // OPML structure can be nested. We need to find all 'outline' tags 
+    // that have an 'xmlUrl' attribute (the actual feeds).
+    const allOutlines = [];
+    // Recursive helper to find all feed entries in nested folders
+    function findFeeds(node) {
+      if (!node) return;
+      const outlines = Array.isArray(node) ? node : [node];
+      for (const item of outlines) {
+        if (item["@_xmlUrl"]) {
+          allOutlines.push({
+            name: item["@_text"] || item["@_title"] || "Unknown Feed",
+            url: item["@_xmlUrl"]
+          });
+        }
+        // If it has children, recurse
+        if (item.outline) {
+          findFeeds(item.outline);
+        }
+      }
+    }
 
-  // Troublesome RSS Feeds
-  { name: "Amusing Planet", url: "https://www.amusingplanet.com/feeds/posts/default?alt=rss" },
-  { name: "Apple News", url: "https://www.apple.com/newsroom/rss-feed.rss" },
-  { name: "Allen Pike", url: "https://feeds.allenpike.com/feed/" },
-  
-  // Podcast Feeds
-  { name: "Accidental Tech Podcast", url: "https://atp.fm/rss" },
-  { name: "ArchaeoEd Podcast", url: "https://feeds.buzzsprout.com/1314529.rss" },
-  { name: "Arms Control Wonk", url: "https://armscontrolwonk.libsyn.com/rss" },
-  { name: "Autoline Daily", url: "https://www.spreaker.com/show/3270299/episodes/feed" },
-  { name: "Bay Curious", url: "https://feeds.megaphone.fm/KQINC4698044094" },
-  { name: "Criminal", url: "https://feeds.megaphone.fm/VMP7924981569" },
-  { name: "Diggnation", url: "https://feeds.transistor.fm/diggnation" },
-  { name: "Disrupting Japan", url: "https://www.disruptingjapan.com/feed/podcast/" },
-  { name: "Land of the Giants", url: "https://feeds.megaphone.fm/landofthegiants" },
-  { name: "Lex Fridman Podcast", url: "https://lexfridman.com/feed/podcast/" },
-  { name: "Mobile Dev Japan", url: "https://anchor.fm/s/108113308/podcast/rss" },
-  { name: "More Perfect", url: "https://feeds.simplecast.com/lQwwDIs1" },
-  { name: "On with Kara Swisher", url: "https://feeds.megaphone.fm/VMP1684715893" },
-  { name: "Science Vs", url: "https://feeds.megaphone.fm/sciencevs" },
-  { name: "Shell Game", url: "https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/d3d3abca-191a-4010-8160-b3530112d393/c639b22c-ee8c-43dd-86c1-b3530112d3a3/podcast.rss" },
-  { name: "The Rest Is History", url: "https://feeds.megaphone.fm/GLT4787413333" },
-  { name: "The Rest Is Politics: US", url: "https://feeds.megaphone.fm/GLT5336643697" },
-  { name: "The Talk Show", url: "https://daringfireball.net/thetalkshow/rss" },
-  { name: "This Podcast Will Kill You", url: "https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/e0709a39-232b-4483-8e4f-b24c0111ae2c/64b4c224-562e-4b2f-9f31-b24c0111ae53/podcast.rss" },
-  { name: "Unexplainable", url: "https://feeds.megaphone.fm/VMP9331026707" },
-  { name: "Upgrade", url: "https://www.relay.fm/upgrade/feed" },
-  { name: "What Trump Can Teach Us About Con Law", url: "https://feeds.simplecast.com/jZLi00b4" },
-  { name: "日本語 with あこ", url: "https://anchor.fm/s/2e08a010/podcast/rss" },
-  
-  // Troublesome Podcast Feeds
-  { name: "Acquired", url: "https://feeds.transistor.fm/acquired" },
-  { name: "All-In", url: "https://rss.libsyn.com/shows/254861/destinations/1928300.xml" },
-  { name: "Apple News Today", url: "https://apple.news/podcast/apple_news_today" },
-  { name: "99% Invisible", url: "https://feeds.simplecast.com/BqbsxVfO" },
-  { name: "Decoder", url: "https://feeds.megaphone.fm/recodedecode" },
-  { name: "Grammar Girl", url: "https://feeds.simplecast.com/XcH2p3Ah" },
-  { name: "My Favorite Murder", url: "https://www.omnycontent.com/d/playlist/e73c998e-6e60-432f-8610-ae210140c5b1/bdde8bb3-169d-43b1-91d3-b24c0047969c/f450d41f-16bc-4ecd-8f6c-b24c004796e2/podcast.rss" },
-  { name: "Nihongo con Teppei", url: "http://nihongoconteppei.com/feed/podcast" },
-  { name: "Open to Debate", url: "https://feeds.megaphone.fm/PNP1207584390" },
-  { name: "Radiolab", url: "https://feeds.simplecast.com/EmVW7VGp" },
-  { name: "The Vergecast", url: "https://feeds.megaphone.fm/vergecast" },
-  { name: "Today, Explained", url: "https://feeds.megaphone.fm/VMP5705694065" },
-  { name: "YUYUの日本語Podcast", url: "https://anchor.fm/s/cda85d4/podcast/rss" },
-
-];
+    findFeeds(jsonObj.opml.body.outline);
+    return allOutlines;
+  } catch (err) {
+    console.error(`Critical Error: Could not load OPML file at ${path}: ${err.message}`);
+    process.exit(1);
+  }
+}
 
 // Helper to avoid W3C rate limits
 const wait = (ms) => new Promise(resolve => {
   console.log(`...Waiting for ${ms}ms...`);
   setTimeout(resolve, ms);
 });
-
 
 async function performProxyHealthCheck() {
   try {
@@ -113,8 +80,8 @@ async function getProxyURLStringWithURLString(urlString) {
 async function getXMLBodyWithURLString(urlString) {
   const MAX_SIZE = 3 * 1024 * 1024;
   const HEADERS = {
-    'User-Agent': 'Overcast/3.0 (+http://overcast.fm/; iOS podcast app)',
-    'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+    'User-Agent': 'Mozilla/5.0 Vienna/3.9.5',
+    'Accept': 'application/rss+xml, application/xml, application/atom, text/xml, */*',
     'Accept-Language': 'en, *;q=0.5'
   };
   try {
@@ -178,12 +145,12 @@ async function getW3CValidationByURL(publicURL) {
       method: 'GET' // URL-based validation can use a simple GET
     });
     if (!response.ok) {
-      console.error(`[W3C] Validation failed for ${target}. Status: ${response.status}`);
+      console.error(`Error getW3CValidationByURL: ${target}. Status: ${response.status}`);
       return null;
     }
     return await response.text();
   } catch (error) {
-    console.error(`[W3C] Fetch error:`, error);
+    console.error(`Error getW3CValidationByURL:`, error);
     return null;
   }
 }
@@ -254,17 +221,18 @@ async function startTests() {
       // RHS First
       // R1. Get RHS via Proxy
       const rhsURL = await getProxyURLStringWithURLString(lhs.url);
-      if (!rhsURL) { errorCount += 1; continue; }
+      if (!rhsURL) { throw new Error("Failed to fetch proxied URL from localhost:3000"); }
       // R2. Fetch both XML bodies
       const rhsXML = await getXMLBodyWithURLString(rhsURL);
+      if (!rhsXML) { throw new Error("Failed to fetch proxied feed from localhost:3000"); }
       const proxyRunning = await performProxyHealthCheck()
-      if (!proxyRunning || !rhsXML) { errorCount += 1; break; }
+      if (!proxyRunning) { throw new Error("localhost:3000 crashed"); }
       // R3. Fetch W3C Validation
       const rhsW3C = await getW3CXMLBodyWithXMLBody(rhsXML);
-      if (!rhsW3C) { errorCount += 1; continue; }
+      if (!rhsW3C) { throw new Error("W3C Validation Request Failed"); }
       // R4. Analyze W3C Validation
       const rhsIssues = analyzeW3CXMLBody(rhsW3C);
-      if (!rhsIssues) { errorCount += 1; continue; }
+      if (!rhsIssues) { throw new Error("Failed to parse the W3C Validation Request"); }
       const rhsIssuesString = JSON.stringify(rhsIssues, null, 2);
       
       // L3. Fetch W3C Validation
@@ -289,12 +257,11 @@ async function startTests() {
         }
       } else {
         // Unable to compare
-        // TODO: Figure out how to validate these items
         console.log(`Unknown: ${lhs.name} \n${rhsIssuesString}`);
         unknownCount += 1;
       }
     } catch (err) {
-      console.error(`Error: ${lhs.name} ${err.message}`);
+      console.error(`Failure: ${lhs.name} ${err.message}`);
       errorCount += 1;
     }
   }
