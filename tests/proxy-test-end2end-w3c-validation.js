@@ -54,7 +54,7 @@ const wait = (ms) => new Promise(resolve => {
 
 async function performProxyHealthCheck() {
   try {
-    const res = await fetch(`http://localhost:3000/proxy`);
+    const res = await fetch(`http://localhost:3000/proxy/`);
     return res.status !== 500; // If it's 500, the server is alive but erroring
   } catch (e) {
     console.error(`Error: Proxy appears to have crashed: ${e.message} ${e.cause}`);
@@ -64,7 +64,7 @@ async function performProxyHealthCheck() {
 
 async function getProxyURLStringWithURLString(urlString) {
   try {
-    const response = await fetch(`http://localhost:3000/proxy?key=${API_KEY}&url=${encodeURIComponent(urlString)}`);
+    const response = await fetch(`http://localhost:3000/proxy/?key=${API_KEY}&url=${encodeURIComponent(urlString)}`);
     if (!response.ok) { 
       console.error(`Error: getProxyURLStringWithURLString(${urlString})`);
       return null; 

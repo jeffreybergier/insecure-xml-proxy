@@ -31,7 +31,7 @@ jobs:
 
       - name: Verify Server is Live
         run: |
-          curl --silent --fail http://localhost:3000/proxy > /dev/null || exit 1
+          curl --silent --fail http://localhost:3000/proxy/ > /dev/null || exit 1
           echo "Proxy Server is up and reachable!"
 
       - name: Run Feed Comparison Tests

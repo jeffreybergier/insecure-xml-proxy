@@ -2,7 +2,7 @@ import * as Proxy  from './proxy.js';
 import * as Auth from './auth.js';
 
 export const AllRoutes = {
-  proxy: "/proxy",
+  proxy: Auth.PROXY_VALID_PATH,
   getRoute(pathname) {
     if (pathname.startsWith(this.proxy)) return this.proxy;
     return null;

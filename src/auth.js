@@ -1,4 +1,6 @@
 
+export const PROXY_VALID_PATH = "/proxy/";
+
 export let VALID_KEYS = null;
 
 export function AUTH_LOAD(env) {

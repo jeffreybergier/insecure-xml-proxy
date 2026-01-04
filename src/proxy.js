@@ -1,7 +1,9 @@
 import * as Auth from './auth.js';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 
-export const Option = {
+// MARK: Custom Types
+
+const Option = {
   auto:  "auto",
   feed:  "feed",
   html:  "html",
@@ -31,6 +33,8 @@ export const Option = {
 };
 
 Object.freeze(Option);
+
+// MARK: Controller
 
 export async function getProxyResponse(request) {
 
@@ -103,7 +107,7 @@ function getSubmitForm() {
       Authorities or lack of modern TLS protocols.
     </p>
     <h2>Generate Proxy URL</h2>
-    <form action="/proxy" method="GET">
+    <form action="${Auth.PROXY_VALID_PATH}" method="GET">
       <p>
         <label for="key">API Key:</label><br>
         <input type="text" id="key" name="key">
@@ -157,72 +161,11 @@ function getSubmitResult(submittedURL,
   });
 }
 
-function encode(targetURL, 
-                requestURL, 
-                targetOption, 
-                authorizedAPIKey) 
-{  
-  if (!(targetURL  instanceof URL)
-   || !(requestURL instanceof URL)
-   || typeof authorizedAPIKey !== "string") 
-  { throw new Error(`Parameter Error: targetURL(${targetURL}), requestURL(${requestURL}), targetOption(${targetOption}), authorizedAPIKey(${authorizedAPIKey})`); }
-  
-  // get the target filename
-  const pathComponents = targetURL.pathname.split('/');
-  let fileName = pathComponents.filter(Boolean).pop() || "";
-  
-  // encode the targetURL
-  const targetURI = encodeURIComponent(targetURL.toString());
-  const targetBase = btoa(targetURI);
-  const targetEncoded = encodeURIComponent(targetBase);
-  
-  // construct the encoded url
-  // TODO: replace requestURL with baseURL and then use JS constructor to append path properly
-  // https://developer.mozilla.org/en-US/docs/Web/API/URL_API/Resolving_relative_references
-  let encodedURLString = `${requestURL.protocol}//${requestURL.host}/proxy/${targetEncoded}/${fileName}?key=${authorizedAPIKey}`;
-  if (targetOption) encodedURLString+= `&option=${targetOption}`
-  const encodedURL = new URL(encodedURLString);
-  
-  // TODO: Remove the excess logging
-  console.log(`[proxy.encode] ${targetURL.toString()}`);
-  return encodedURL;
-}
-
-function decode(requestURL) {
-  if (!(requestURL instanceof URL)) throw new Error("Parameter Error: Invalid URL");
-  
-  // url.pathname ignores the query string (?key=...) 
-  // so splitting this is safe from parameters.
-  const pathComponents = requestURL.pathname.split('/'); 
-  
-  // Path: /proxy/ENCODED_STRING/file.mp3
-  // Path: /proxy/ENCODED_STRING/
-  // Path: /proxy/ENCODED_STRING
-  // Components: ["", "proxy", "ENCODED_STRING", "file.mp3"]
-  const proxyIndex = pathComponents.indexOf("proxy");
-  if (proxyIndex === -1 || !pathComponents[proxyIndex + 1]) {
-    return null; 
-  }
-  const targetEncoded = pathComponents[proxyIndex + 1];
-
-  try {
-    const targetBase = decodeURIComponent(targetEncoded);
-    const targetURI = atob(targetBase);
-    const targetURLString = decodeURIComponent(targetURI);
-    const targetURL = new URL(targetURLString);
-    console.log(`[proxy.decode] ${targetURLString}`);
-    return targetURL;
-  } catch (error) {
-    console.error(`[proxy.decode] error ${error.message}`);
-    return null;
-  }
-}
-
-export async function getFeed(targetURL, 
-                              requestURL,
-                             _requestHeaders,
-                              requestMethod, 
-                              authorizedAPIKey) 
+async function getFeed(targetURL, 
+                       requestURL,
+                      _requestHeaders,
+                       requestMethod, 
+                       authorizedAPIKey) 
 {
   if (!(targetURL instanceof URL)
    || !(requestURL instanceof URL)
@@ -242,62 +185,6 @@ export async function getFeed(targetURL,
     });
   }
   
-  /**
-   * CDATA-aware URL patcher with Predicate
-   * @param {Object} parent - Parent object
-   * @param {string} key - Property name
-   * @param {number} option - The Option enum
-   * @param {Function} where - (Optional) (parent) => boolean
-   */
-  function XML_encodeURL(parent, key, option, where) {
-    if (!parent || !parent[key]) return;
-    const target = parent[key];
-    // 1. Handle Array Case (Recursive)
-    if (Array.isArray(target)) {
-      target.forEach((_, index) => {
-        // We pass the array as the parent and the index as the key
-        X_setURL(target, index, option, where);
-      });
-      return;
-    }
-    // 2. Apply Predicate (where clause)
-    // We pass 'parent' so the caller can check siblings or attributes
-    if (where && !where(parent)) return;
-    const original = target;
-    // 3. Extract raw string (handle CDATA vs String)
-    const rawValue = (typeof original === "object" && original.__cdata) 
-                     ? original.__cdata 
-                     : original;
-    if (typeof rawValue !== "string") return;
-    // 4. Parse and Trim (Fixes Arms Control Wonk whitespace)
-    const rawValueURL = URL.parse(rawValue.trim());
-    if (!rawValueURL) return;
-    // 5. Encode
-    const resultURL = encode(rawValueURL, requestURL, option, authorizedAPIKey);
-    if (!(resultURL instanceof URL)) return;
-    const finalString = resultURL.toString();
-    // 6. Re-wrap in original format
-    parent[key] = (typeof original === "object" && "__cdata" in original)
-      ? { "__cdata": finalString }
-      : finalString;
-  }
-
-  // TODO: Delete these
-  // 1. Extracts the string regardless of whether it's CDATA or a plain string
-  function X_getCD(val) {
-    if (!val) return null;
-    if (typeof val === "string") return val;
-    if (val.__cdata) return val.__cdata;
-    return null;
-  }
-  
-  // 2. Wraps the new value back into the original format (CDATA or String)
-  function X_setCD(originalVal, newVal) {
-    return (typeof originalVal === "object" && "__cdata" in originalVal)
-          ? { "__cdata": newVal }
-          : newVal;
-  }
-  
   console.log(`[proxy.feed] rewrite-start: ${targetURL.toString()}`);
   try {
     // 1. Download the original feed
@@ -311,146 +198,15 @@ export async function getFeed(targetURL,
       return response;
     }
     
-    const timelimit = new Date();
-    timelimit.setMonth(timelimit.getMonth() - 6);
+    // Download and Rewrite XML
     const originalXML = await response.text();
+    const rewrittenXML = rewriteFeedXML(originalXML, requestURL, authorizedAPIKey);
     
-    // 2. Create the XML Parser
-    const parser = new XMLParser({ 
-      ignoreAttributes: false, 
-      attributeNamePrefix: "@_",
-      parseTagValue: false,
-      cdataPropName: "__cdata"
-    });
-    const builder = new XMLBuilder({ 
-      ignoreAttributes: false, 
-      format: true,
-      suppressBooleanAttributes: false,
-      suppressEmptyNode: true,
-      cdataPropName: "__cdata"
-    });
-    
-    let xml = parser.parse(originalXML);
-    const rssChannel = xml.rss?.channel;
-    
-    // 3 Patch the Channel
-    // Delete any stylesheet
-    // TODO: Learn how to resolve relative URL's in order to fix
-    // <?xml-stylesheet type="text/xsl" media="screen" href="/~files/atom-premium.xsl"?>
-    // https://feeds.allenpike.com/feed/
-    if (xml["?xml-stylesheet"]) delete xml["?xml-stylesheet"];
-    if (rssChannel) {
-      // 3.1 Replace itunes:new-feed-url
-      XML_encodeURL(rssChannel, "itunes:new-feed-url", Option.feed);
-      // 3.2 Replace itunes:image
-      XML_encodeURL(rssChannel["itunes:image"], "@_href", Option.asset);
-      // 3.3 Replace Links
-      XML_encodeURL(rssChannel, "link", Option.auto);
-      // 3.4 Replace Self Link
-      XML_encodeURL(rssChannel["atom:link"], "@_href", Option.feed, parent => {
-        return parent["@_rel"] === "self";
-      });
-      // 3.5 Replace the channel image
-      if (!Array.isArray(rssChannel.image)) rssChannel.image = (rssChannel.image) 
-                                                             ? [rssChannel.image] 
-                                                             : [];
-      rssChannel.image.forEach(image => {
-        XML_encodeURL(image, "url", Option.asset);
-        XML_encodeURL(image, "link", Option.auto);
-      });
-      // 3.6 Remove items over 1 year old
-      rssChannel.item = rssChannel.item.filter(item => {
-        const pubDate = new Date(item.pubDate);
-        return pubDate > timelimit;
-      });
-      
-      // 4 Patch each item in the channel
-      if (!Array.isArray(rssChannel.item)) rssChannel.item = (rssChannel.item) 
-                                                     ? [rssChannel.item] 
-                                                     : [];
-      rssChannel.item.forEach(item => {
-        // 4.1 Replace the Link property
-        XML_encodeURL(item, "link", Option.auto);
-        // 4.2 Replace the itunes image url
-        XML_encodeURL(item["itunes:image"], "@_href", Option.asset);
-        // 4.3 Replace enclosure url
-        XML_encodeURL(item.enclosure, "@_url", Option.asset);
-        // 4.4 TODO: Edit the Content tag as if it were HTML
-      });
-    }
-    
-    const rssFeed = xml.feed;
-    // 5 Patch the RSS feed
-    if (rssFeed) {
-      // 5.1 Proxy all of the link references
-      if (!Array.isArray(rssFeed.link)) rssFeed.link = (rssFeed.link) 
-                                                     ? [rssFeed.link] 
-                                                     : [];
-      rssFeed.link.forEach(link => {
-        const linkURL = URL.parse(link["@_href"]);
-        if (!linkURL) return;
-        let option = Option.auto;
-        if (link["@_type"]?.toLowerCase().includes("html" )) option = Option.html;
-        if (link["@_type"]?.toLowerCase().includes("xml"  )) option = Option.feed;
-        if (link["@_type"]?.toLowerCase().includes("rss"  )) option = Option.feed;
-        if (link["@_type"]?.toLowerCase().includes("atom" )) option = Option.feed;
-        if (link["@_type"]?.toLowerCase().includes("audio")) option = Option.asset;
-        if (link["@_type"]?.toLowerCase().includes("image")) option = Option.asset;
-        if (link["@_rel" ]?.toLowerCase().includes("self" )) option = Option.feed;
-        link["@_href"] = encode(linkURL, 
-                                requestURL, 
-                                option,
-                                authorizedAPIKey)
-                               .toString();
-      });
-      
-      // 5.2 replace logo and icon which are in the spec
-      XML_encodeURL(rssFeed, "logo", Option.asset);
-      XML_encodeURL(rssFeed, "icon", Option.asset);
-      
-      // 6 Correct all of the entries
-      if (!Array.isArray(rssFeed.entry)) rssFeed.entry = (rssFeed.entry) 
-                                                 ? [rssFeed.entry] 
-                                                 : [];
-      rssFeed.entry = rssFeed.entry.filter(item => {
-        const updated = new Date(item.updated);
-        return updated > timelimit;
-      });
-      
-      // 6.1 Patch each link entry
-      rssFeed.entry.forEach(entry => {
-        if (!Array.isArray(entry.link)) entry.link = (entry.link) 
-                                                   ? [entry.link] 
-                                                   : [];
-                                                   
-        entry.link.forEach(link => {
-          const linkURL = URL.parse(link["@_href"]);
-          if (!linkURL) return;
-          let option = Option.auto;
-          if (link["@_type"]?.toLowerCase().includes("html" )) option = Option.html;
-          if (link["@_type"]?.toLowerCase().includes("xml"  )) option = Option.feed;
-          if (link["@_type"]?.toLowerCase().includes("rss"  )) option = Option.feed;
-          if (link["@_type"]?.toLowerCase().includes("atom" )) option = Option.feed;
-          if (link["@_type"]?.toLowerCase().includes("audio")) option = Option.asset;
-          if (link["@_type"]?.toLowerCase().includes("image")) option = Option.asset;
-          link["@_href"] = encode(linkURL, 
-                                  requestURL, 
-                                  option,
-                                  authorizedAPIKey)
-                                 .toString();
-        });
-        
-        // 6.2 TODO: Edit the Content tag as if it were HTML
-      });
-    }
-
-    // 4. Return the modified XML Response
-    const rewrittenXML = builder.build(xml);
+    // Return Response
     const rewrittenXMLSize = new TextEncoder().encode(rewrittenXML).length;
     const responseHeaders = sanitizedResponseHeaders(response.headers);
     responseHeaders.set('Content-Type', 'text/xml; charset=utf-8');
     responseHeaders.set('Content-Length', rewrittenXMLSize);
-    
     console.log(`[proxy.feed] rewrite-done: ${targetURL.toString()} size: ${rewrittenXMLSize.toString()}`);
     return new Response(rewrittenXML, {
       status: response.status,
@@ -484,7 +240,248 @@ function getAsset(targetURL,
   });
 }
 
-function sanitizedRequestHeaders(incomingHeaders) {
+
+
+// MARK: Model (Testable)
+
+export function rewriteFeedXML(originalXML, requestURL, authorizedAPIKey) {
+
+  function XML_encodeURL(parent, key, option, where) {
+    if (!parent || !parent[key]) return;
+    const target = parent[key];
+    // 1. Handle Array Case (Recursive)
+    if (Array.isArray(target)) {
+      target.forEach((_, index) => {
+        // We pass the array as the parent and the index as the key
+        X_setURL(target, index, option, where);
+      });
+      return;
+    }
+    // 2. Apply Predicate (where clause)
+    // We pass 'parent' so the caller can check siblings or attributes
+    if (where && !where(parent)) return;
+    const original = target;
+    // 3. Extract raw string (handle CDATA vs String)
+    const rawValue = (typeof original === "object" && original.__cdata) 
+                     ? original.__cdata 
+                     : original;
+    if (typeof rawValue !== "string") return;
+    // 4. Parse and Trim (Fixes Arms Control Wonk whitespace)
+    const rawValueURL = URL.parse(rawValue.trim());
+    if (!rawValueURL) return;
+    // 5. Encode
+    const resultURL = encode(rawValueURL, requestURL, option, authorizedAPIKey);
+    if (!(resultURL instanceof URL)) return;
+    const finalString = resultURL.toString();
+    // 6. Re-wrap in original format
+    parent[key] = (typeof original === "object" && "__cdata" in original)
+      ? { "__cdata": finalString }
+      : finalString;
+  }
+  
+  if (!(requestURL instanceof URL)
+   || typeof originalXML !== "string"
+   || typeof authorizedAPIKey !== "string") 
+  { throw new Error("Parameter Error: requestURL, originalXML, authorizedAPIKey"); }
+
+
+  // 1. Set time limit for articles
+  const timelimit = new Date();
+  timelimit.setMonth(timelimit.getMonth() - 6);
+  
+  // 2. Create Parser and Builder
+  const parser = new XMLParser({ 
+    ignoreAttributes: false, 
+    attributeNamePrefix: "@_",
+    parseTagValue: false,
+    cdataPropName: "__cdata"
+  });
+  const builder = new XMLBuilder({ 
+    ignoreAttributes: false, 
+    format: true,
+    suppressBooleanAttributes: false,
+    suppressEmptyNode: true,
+    cdataPropName: "__cdata"
+  });
+  
+  // Start Processing
+  let xml = parser.parse(originalXML);
+  if (xml["?xml-stylesheet"]) delete xml["?xml-stylesheet"]; // Delete any stylesheet
+  const rssChannel = xml.rss?.channel;
+  
+  // 3 Patch the Atom Channel
+  if (rssChannel) {
+    // 3.1 Replace itunes:new-feed-url
+    XML_encodeURL(rssChannel, "itunes:new-feed-url", Option.feed);
+    // 3.2 Replace itunes:image
+    XML_encodeURL(rssChannel["itunes:image"], "@_href", Option.asset);
+    // 3.3 Replace Links
+    XML_encodeURL(rssChannel, "link", Option.auto);
+    // 3.4 Replace Self Link
+    XML_encodeURL(rssChannel["atom:link"], "@_href", Option.feed, parent => {
+      return parent["@_rel"] === "self";
+    });
+    // 3.5 Replace the channel image
+    if (!Array.isArray(rssChannel.image)) rssChannel.image = (rssChannel.image) 
+                                                           ? [rssChannel.image] 
+                                                           : [];
+    rssChannel.image.forEach(image => {
+      XML_encodeURL(image, "url", Option.asset);
+      XML_encodeURL(image, "link", Option.auto);
+    });
+    // 3.6 Remove items over 1 year old
+    rssChannel.item = rssChannel.item.filter(item => {
+      const pubDate = new Date(item.pubDate);
+      return pubDate > timelimit;
+    });
+    
+    // 4 Patch each item in the channel
+    if (!Array.isArray(rssChannel.item)) rssChannel.item = (rssChannel.item) 
+                                                   ? [rssChannel.item] 
+                                                   : [];
+    rssChannel.item.forEach(item => {
+      // 4.1 Replace the Link property
+      XML_encodeURL(item, "link", Option.auto);
+      // 4.2 Replace the itunes image url
+      XML_encodeURL(item["itunes:image"], "@_href", Option.asset);
+      // 4.3 Replace enclosure url
+      XML_encodeURL(item.enclosure, "@_url", Option.asset);
+      // 4.4 TODO: Edit the Content tag as if it were HTML
+    });
+  }
+  
+  const rssFeed = xml.feed;
+  // 5 Patch the RSS feed
+  if (rssFeed) {
+    // 5.1 Proxy all of the link references
+    if (!Array.isArray(rssFeed.link)) rssFeed.link = (rssFeed.link) 
+                                                   ? [rssFeed.link] 
+                                                   : [];
+    rssFeed.link.forEach(link => {
+      const linkURL = URL.parse(link["@_href"]);
+      if (!linkURL) return;
+      let option = Option.auto;
+      if (link["@_type"]?.toLowerCase().includes("html" )) option = Option.html;
+      if (link["@_type"]?.toLowerCase().includes("xml"  )) option = Option.feed;
+      if (link["@_type"]?.toLowerCase().includes("rss"  )) option = Option.feed;
+      if (link["@_type"]?.toLowerCase().includes("atom" )) option = Option.feed;
+      if (link["@_type"]?.toLowerCase().includes("audio")) option = Option.asset;
+      if (link["@_type"]?.toLowerCase().includes("image")) option = Option.asset;
+      if (link["@_rel" ]?.toLowerCase().includes("self" )) option = Option.feed;
+      link["@_href"] = encode(linkURL, 
+                              requestURL, 
+                              option,
+                              authorizedAPIKey)
+                             .toString();
+    });
+    
+    // 5.2 replace logo and icon which are in the spec
+    XML_encodeURL(rssFeed, "logo", Option.asset);
+    XML_encodeURL(rssFeed, "icon", Option.asset);
+    
+    // 6 Correct all of the entries
+    if (!Array.isArray(rssFeed.entry)) rssFeed.entry = (rssFeed.entry) 
+                                               ? [rssFeed.entry] 
+                                               : [];
+    rssFeed.entry = rssFeed.entry.filter(item => {
+      const updated = new Date(item.updated);
+      return updated > timelimit;
+    });
+    
+    // 6.1 Patch each link entry
+    rssFeed.entry.forEach(entry => {
+      if (!Array.isArray(entry.link)) entry.link = (entry.link) 
+                                                 ? [entry.link] 
+                                                 : [];
+                                                 
+      entry.link.forEach(link => {
+        const linkURL = URL.parse(link["@_href"]);
+        if (!linkURL) return;
+        let option = Option.auto;
+        if (link["@_type"]?.toLowerCase().includes("html" )) option = Option.html;
+        if (link["@_type"]?.toLowerCase().includes("xml"  )) option = Option.feed;
+        if (link["@_type"]?.toLowerCase().includes("rss"  )) option = Option.feed;
+        if (link["@_type"]?.toLowerCase().includes("atom" )) option = Option.feed;
+        if (link["@_type"]?.toLowerCase().includes("audio")) option = Option.asset;
+        if (link["@_type"]?.toLowerCase().includes("image")) option = Option.asset;
+        link["@_href"] = encode(linkURL, 
+                                requestURL, 
+                                option,
+                                authorizedAPIKey)
+                               .toString();
+      });
+      
+      // 6.2 TODO: Edit the Content tag as if it were HTML
+    });
+  }
+
+  // 4. Return the modified XML Response
+  const rewrittenXML = builder.build(xml);
+  return rewrittenXML;
+}
+
+export function encode(targetURL, 
+                       requestURL, 
+                       targetOption, 
+                       authorizedAPIKey) 
+{  
+  if (!(targetURL  instanceof URL)
+   || !(requestURL instanceof URL)
+   || typeof authorizedAPIKey !== "string") 
+  { throw new Error(`Parameter Error: targetURL(${targetURL}), requestURL(${requestURL}), targetOption(${targetOption}), authorizedAPIKey(${authorizedAPIKey})`); }
+  
+  // get the target filename
+  const pathComponents = targetURL.pathname.split('/');
+  let fileName = pathComponents.filter(Boolean).pop() || "";
+  
+  // encode the targetURL
+  const targetURI = encodeURIComponent(targetURL.toString());
+  const targetBase = btoa(targetURI);
+  const targetEncoded = encodeURIComponent(targetBase);
+  
+  // construct the encoded url
+  // TODO: replace requestURL with baseURL and then use JS constructor to append path properly
+  // https://developer.mozilla.org/en-US/docs/Web/API/URL_API/Resolving_relative_references
+  let encodedURLString = `${requestURL.protocol}//${requestURL.host}${Auth.PROXY_VALID_PATH}${targetEncoded}/${fileName}?key=${authorizedAPIKey}`;
+  if (targetOption) encodedURLString+= `&option=${targetOption}`
+  const encodedURL = new URL(encodedURLString);
+  
+  // TODO: Remove the excess logging
+  console.log(`[proxy.encode] ${targetURL.toString()}`);
+  return encodedURL;
+}
+
+export function decode(requestURL) {
+  if (!(requestURL instanceof URL)) throw new Error("Parameter Error: Invalid URL");
+  
+  // url.pathname ignores the query string (?key=...) 
+  // so splitting this is safe from parameters.
+  const pathComponents = requestURL.pathname.split('/'); 
+  
+  // Path: /proxy/ENCODED_STRING/file.mp3
+  // Path: /proxy/ENCODED_STRING/
+  // Path: /proxy/ENCODED_STRING
+  // Components: ["", "proxy", "ENCODED_STRING", "file.mp3"]
+  const proxyIndex = pathComponents.indexOf("proxy");
+  if (proxyIndex === -1 || !pathComponents[proxyIndex + 1]) {
+    return null; 
+  }
+  const targetEncoded = pathComponents[proxyIndex + 1];
+
+  try {
+    const targetBase = decodeURIComponent(targetEncoded);
+    const targetURI = atob(targetBase);
+    const targetURLString = decodeURIComponent(targetURI);
+    const targetURL = new URL(targetURLString);
+    console.log(`[proxy.decode] ${targetURLString}`);
+    return targetURL;
+  } catch (error) {
+    console.error(`[proxy.decode] error ${error.message}`);
+    return null;
+  }
+}
+
+export function sanitizedRequestHeaders(incomingHeaders) {
   const forbidden = [
     'host',
     'connection',
@@ -516,7 +513,7 @@ function sanitizedRequestHeaders(incomingHeaders) {
   return headers;
 }
 
-function sanitizedResponseHeaders(incomingHeaders) {
+export function sanitizedResponseHeaders(incomingHeaders) {
   const forbidden = [
     'content-length',
     'content-encoding',
