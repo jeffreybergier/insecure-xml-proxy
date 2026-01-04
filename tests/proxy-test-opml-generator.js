@@ -1,65 +1,101 @@
 import fs from "fs";
-import { XMLParser } from "fast-xml-parser";
+import { XMLParser, XMLBuilder } from "fast-xml-parser";
+import * as Proxy from '../src/proxy.js';
 
-const API_KEY = process.env.OPML_KEY;
-const SERVERS_RAW = process.env.SERVERS;
-const SERVERS = JSON.parse(SERVERS_RAW);
 const OPML_INPUT_PATH = "./tests/proxy-test-feeds.opml";
 const OPML_OUTPUT_PATH = "./tests/proxy-test-feeds-generated.opml";
-const INPUT_FEEDS = loadFeedsFromOPML(OPML_INPUT_PATH);
 
 /**
- * Loads and parses the OPML file into a flat array of { name, url }
+ * Loads the original OPML and returns the body structure
  */
-function loadFeedsFromOPML(path) {
+function getOriginalStructure(path) {
   try {
     const xmlData = fs.readFileSync(path, "utf8");
     const parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: "@_",
     });
-
     const jsonObj = parser.parse(xmlData);
-    // OPML structure can be nested. We need to find all 'outline' tags 
-    // that have an 'xmlUrl' attribute (the actual feeds).
-    const allOutlines = [];
-    // Recursive helper to find all feed entries in nested folders
-    function findFeeds(node) {
-      if (!node) return;
-      const outlines = Array.isArray(node) ? node : [node];
-      for (const item of outlines) {
-        if (item["@_xmlUrl"]) {
-          allOutlines.push({
-            name: item["@_text"] || item["@_title"] || "Unknown Feed",
-            url: item["@_xmlUrl"]
-          });
-        }
-        // If it has children, recurse
-        if (item.outline) {
-          findFeeds(item.outline);
-        }
-      }
-    }
-
-    findFeeds(jsonObj.opml.body.outline);
-    return allOutlines;
+    return jsonObj.opml.body.outline;
   } catch (err) {
-    console.error(`Critical Error: Could not load OPML file at ${path}: ${err.message}`);
+    console.error(`Critical Error reading input: ${err.message}`);
     process.exit(1);
   }
 }
 
+/**
+ * Recursively updates feed URLs with the proxy server
+ */
+function transformStructure(nodes, serverUrl, key) {
+  const nodeList = Array.isArray(nodes) ? nodes : [nodes];
+  return nodeList.map(node => {
+    const newNode = { ...node };
+    // 1. If this is a feed item, encode the URL
+    if (newNode["@_xmlUrl"]) {
+      newNode["@_xmlUrl"] = encode(newNode["@_xmlUrl"], serverUrl, key);
+    }
+    // 2. If this is a folder, recurse
+    if (newNode.outline) {
+      newNode.outline = transformStructure(newNode.outline, serverUrl, key);
+    }
+    return newNode;
+  });
+}
+
+/**
+ * Wraps the target URL using the Proxy utility
+ */
+function encode(targetURLString, requestURLString, key) {
+  const targetURL = new URL(targetURLString);
+  const requestURL = new URL(requestURLString);
+  const outputURL = Proxy.encode(
+    targetURL, 
+    requestURL, 
+    Proxy.Option.feed, 
+    key
+  );
+  return outputURL.toString();
+}
+
 function generateOPML() {
-  if (!Array.isArray(SERVERS)
-   || typeof API_KEY !== "string"
-   || !INPUT_FEEDS)
-  { console.error("Environment not configured"); process.exit(1); }
+  const serverUrl = process.argv[2];
+  const apiKey = process.argv[3];
+  if (!serverUrl || !apiKey) {
+    console.error("Usage: node tests/proxy-test-opml-generator.js <SERVER_URL> <API_KEY>");
+    process.exit(1);
+  }
+  console.log(`proxy-test-opml-generator.js: Generating for ${serverUrl}`);
   
-  console.log("proxy-test-opml-generator.js: OPML-Start");
-  const outputOPML = JSON.stringify(INPUT_FEEDS, null, 2);
-  // TODO: This just outputs JSON for now, but its a test to make sure the POC works
-  fs.writeFileSync(OPML_OUTPUT_PATH, outputOPML, 'utf8');
-  console.log("proxy-test-opml-generator.js: OPML-Done");
+  const originalStructure = getOriginalStructure(OPML_INPUT_PATH);
+  const host = new URL(serverUrl).hostname;
+  const opmlObject = {
+    "?xml": {
+      "@_version": "1.0",
+      "@_encoding": "UTF-8"
+    },
+    opml: {
+      "@_version": "2.0",
+      head: {
+        title: `Proxy Test Feeds: ${host}`,
+        dateCreated: new Date().toUTCString()
+      },
+      body: {
+          outline: transformStructure(originalStructure, serverUrl, apiKey)
+      }
+    }
+  };
+
+  const builder = new XMLBuilder({
+    ignoreAttributes: false,
+    attributeNamePrefix: "@_",
+    format: true,
+    suppressEmptyNode: true
+  });
+
+  const outputXML = builder.build(opmlObject);
+  fs.writeFileSync(OPML_OUTPUT_PATH, outputXML, 'utf8');
+  
+  console.log(`proxy-test-opml-generator.js: Done -> ${OPML_OUTPUT_PATH}`);
 }
 
 generateOPML();

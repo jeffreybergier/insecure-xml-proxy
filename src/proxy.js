@@ -3,7 +3,7 @@ import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 
 // MARK: Custom Types
 
-const Option = {
+export const Option = {
   auto:  "auto",
   feed:  "feed",
   html:  "html",
