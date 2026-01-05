@@ -3,6 +3,7 @@ name: proxy-test-end2end-w3c-validation
 on:
   pull_request:
     branches: [ prod ]
+  workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
   proxy-test-end2end-w3c-validation:
@@ -30,7 +31,7 @@ jobs:
 
       - name: Verify Server is Live
         run: |
-          curl --silent --fail http://localhost:3000/proxy > /dev/null || exit 1
+          curl --silent --fail http://localhost:3000/proxy/ > /dev/null || exit 1
           echo "Proxy Server is up and reachable!"
 
       - name: Run Feed Comparison Tests
