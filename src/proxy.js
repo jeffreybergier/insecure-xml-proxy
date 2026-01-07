@@ -204,10 +204,10 @@ async function getFeed(targetURL,
     
     // Download and Rewrite XML
     const originalXML = await response.text();
-    const rewrittenXML = rewriteFeedXML(originalXML, 
-                                        targetURL, 
-                                        baseURL, 
-                                        authorizedAPIKey);
+    const rewrittenXML = await rewriteFeedXML(originalXML, 
+                                              targetURL, 
+                                              baseURL, 
+                                              authorizedAPIKey);
     
     // Return Response
     const rewrittenXMLSize = new TextEncoder().encode(rewrittenXML).length;
@@ -300,65 +300,46 @@ function getAsset(targetURL,
 
 // MARK: Model (Testable)
 
-export function rewriteFeedXML(originalXML, 
-                               targetURL, 
-                               baseURL, 
-                               authorizedAPIKey) 
+export async function rewriteFeedXML(originalXML, 
+                                     targetURL, 
+                                     baseURL, 
+                                     authorizedAPIKey) 
 {
 
-  function XML_rewriteEntryHTML(entry) {
-    [
+  async function XML_rewriteEntryHTML(entry) {
+    const fields = [
       "description",       // RSS 2.0 Summary/Content
       "content:encoded",   // RSS 2.0 Full Content
       "content",           // Atom Full Content
       "summary"            // Atom Summary
-    ].forEach(field => {
-      if (!entry[field]) return;
+    ];
+    for (const field of fields) {
+      if (!entry[field]) continue;
       const isCDATA = (typeof entry[field] === "object" && entry[field]["__cdata"]) ;
       const originalHTML = isCDATA ? entry[field]["__cdata"] : entry[field]
-      let rewrittenHTML = rewriteHTML(originalHTML,
-                                      targetURL, 
-                                      baseURL, 
-                                      authorizedAPIKey);
-      if (isCDATA) {
-        entry[field]["__cdata"] = rewrittenHTML;
-      } else {
-        entry[field] = rewrittenHTML;
-      }
-    });
+      let rewrittenHTML = await rewriteHTMLString(originalHTML,
+                                                  targetURL, 
+                                                  baseURL, 
+                                                  authorizedAPIKey);
+      if (isCDATA) entry[field]["__cdata"] = rewrittenHTML;
+      else entry[field] = rewrittenHTML;
+    }
   }
 
   function XML_encodeURL(parent, key, option, where) {
     if (!parent || !parent[key]) return;
     const target = parent[key];
-    // 1. Handle Array Case (Recursive)
     if (Array.isArray(target)) {
-      target.forEach((_, index) => {
-        // We pass the array as the parent and the index as the key
-        XML_encodeURL(target, index, option, where);
-      });
+      target.forEach((_, index) => XML_encodeURL(target, index, option, where));
       return;
     }
-    // 2. Apply Predicate (where clause)
-    // We pass 'parent' so the caller can check siblings or attributes
     if (where && !where(parent)) return;
-    const original = target;
-    // 3. Extract raw string (handle CDATA vs String)
-    const rawValue = (typeof original === "object" && original.__cdata) 
-                     ? original.__cdata 
-                     : original;
+    const rawValue = (typeof target === "object" && target.__cdata) ? target.__cdata : target;
     if (typeof rawValue !== "string") return;
-    // 4. Parse and Trim (Fixes Arms Control Wonk whitespace)
-    const rawValueURL = URL.parse(rawValue.trim());
-    if (!rawValueURL) return;
-    // 5. Encode
-    const resultURL = encode(rawValueURL, baseURL, option, authorizedAPIKey);
-    if (!(resultURL instanceof URL)) return;
-    const finalString = resultURL.toString();
-    // 6. Re-wrap in original format
-    parent[key] = (typeof original === "object" && "__cdata" in original)
-      ? { "__cdata": finalString }
-      : finalString;
+    const rawURL = URL.parse(rawValue.trim());
+    if (!rawURL) return;
+    const finalURL = encode(rawURL, baseURL, option, authorizedAPIKey).toString();
+    parent[key] = (typeof target === "object" && "__cdata" in target) ? { "__cdata": finalURL } : finalURL;
   }
   
   if (!(baseURL instanceof URL)
@@ -389,9 +370,9 @@ export function rewriteFeedXML(originalXML,
   // Start Processing
   let xml = parser.parse(originalXML);
   if (xml["?xml-stylesheet"]) delete xml["?xml-stylesheet"]; // Delete any stylesheet
-  const rssChannel = xml.rss?.channel;
   
   // 3 Patch the Atom Channel
+  const rssChannel = xml.rss?.channel;
   if (rssChannel) {
     // 3.1 Replace itunes:new-feed-url
     XML_encodeURL(rssChannel, "itunes:new-feed-url", Option.feed);
@@ -421,7 +402,7 @@ export function rewriteFeedXML(originalXML,
       const pubDate = new Date(item.pubDate);
       return pubDate > timelimit;
     });
-    rssChannel.item.forEach(item => {
+    for (const item of rssChannel.item) {
       // 4.2 Replace the Link property
       XML_encodeURL(item, "link", Option.auto);
       // 4.3 Replace the itunes image url
@@ -429,10 +410,9 @@ export function rewriteFeedXML(originalXML,
       // 4.4 Replace enclosure url
       XML_encodeURL(item.enclosure, "@_url", Option.asset);
       // 4.5 Rewrite the HTML in summaries and descriptions
-      XML_rewriteEntryHTML(item);
-    });
+      await XML_rewriteEntryHTML(item);
+    }
   }
-  
   const rssFeed = xml.feed;
   // 5 Patch the RSS feed
   if (rssFeed) {
@@ -473,7 +453,7 @@ export function rewriteFeedXML(originalXML,
     });
     
     // 6.2 Patch each link entry
-    rssFeed.entry.forEach(entry => {
+    for (const entry of rssFeed.entry) {
       if (!Array.isArray(entry.link)) entry.link = (entry.link) 
                                                  ? [entry.link] 
                                                  : [];
@@ -496,13 +476,18 @@ export function rewriteFeedXML(originalXML,
       });
       
       // 6.3 Rewrite the HTML in summaries and descriptions
-      XML_rewriteEntryHTML(entry);
-    });
+      await XML_rewriteEntryHTML(entry);
+    }
   }
 
-  // 4. Return the modified XML Response
-  const rewrittenXML = builder.build(xml);
-  return rewrittenXML;
+  return builder.build(xml);
+}
+
+async function rewriteHTMLString(htmlString, targetURL, baseURL, authorizedAPIKey) {
+  if (!htmlString || typeof htmlString !== 'string') return htmlString;
+  const tempResponse = new Response(htmlString);
+  const transformed = rewriteHTML(tempResponse, targetURL, baseURL, authorizedAPIKey);
+  return await transformed.text();
 }
 
 export function rewriteHTML(response, 
