@@ -1,6 +1,17 @@
 import * as Auth from './auth.js';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 
+let XP_HTMLRewriter;
+if (globalThis.HTMLRewriter) {
+  console.log("[proxy] Using HTMLRewriter from Cloudflare");
+  XP_HTMLRewriter = globalThis.HTMLRewriter;
+} else {
+  console.log("[proxy] Using HTMLRewriter from Node.js");
+  const packageName = "htmlrewriter"; 
+  const mod = await import(packageName);
+  XP_HTMLRewriter = mod.HTMLRewriter;
+}
+
 // MARK: Custom Types
 
 export const Option = {
@@ -40,6 +51,7 @@ export async function getProxyResponse(request) {
 
   // 0. URL Parameters
   const requestURL = new URL(request.url);
+  const baseURL = new URL(Auth.PROXY_VALID_PATH, requestURL.origin);
   const _targetURL = decode(requestURL);
   const _submittedURL = URL.parse(requestURL.searchParams.get('url'));
   const targetURL = (_targetURL) 
@@ -63,7 +75,7 @@ export async function getProxyResponse(request) {
   
   // 4. See if someone is submitting a form for a new URL
   if (_submittedURL) return getSubmitResult(targetURL, 
-                                            requestURL, 
+                                            baseURL, 
                                             option, 
                                             authorizedAPIKey);
 
@@ -71,7 +83,7 @@ export async function getProxyResponse(request) {
   
   // 5. Go through the options and service them
   if (option === Option.feed) return getFeed(targetURL, 
-                                             requestURL,
+                                             baseURL,
                                              request.headers,
                                              request.method, 
                                              authorizedAPIKey);
@@ -79,8 +91,11 @@ export async function getProxyResponse(request) {
                                                request.headers, 
                                                request.method, 
                                                authorizedAPIKey);
-  // TODO: Option.html
-
+  if (option === Option.html) return getHTML(targetURL, 
+                                             baseURL,
+                                             request.headers,
+                                             request.method, 
+                                             authorizedAPIKey);
   return null;
 }
 
@@ -142,16 +157,16 @@ function getSubmitForm() {
 }
 
 function getSubmitResult(submittedURL, 
-                         requestURL, 
+                         baseURL, 
                          option, 
                          authorizedAPIKey) 
 {
   if (!(submittedURL instanceof URL) 
-   || !(requestURL instanceof URL) 
+   || !(baseURL instanceof URL) 
    || !authorizedAPIKey) 
-  { throw new Error("Parameter Error: submittedURL, requestURL, authorizedAPIKey"); }
+  { throw new Error("Parameter Error: submittedURL, baseURL, authorizedAPIKey"); }
   const encodedURL = encode(submittedURL, 
-                            requestURL, 
+                            baseURL, 
                             option, 
                             authorizedAPIKey);
   const bodyContent = `${encodedURL.toString()}`;
@@ -162,17 +177,17 @@ function getSubmitResult(submittedURL,
 }
 
 async function getFeed(targetURL, 
-                       requestURL,
+                       baseURL,
                       _requestHeaders,
                        requestMethod, 
                        authorizedAPIKey) 
 {
   if (!(targetURL instanceof URL)
-   || !(requestURL instanceof URL)
+   || !(baseURL instanceof URL)
    || !_requestHeaders
    || !requestMethod
    || typeof authorizedAPIKey !== "string") 
-   { throw new Error("Parameter Error: targetURL, requestURL, requestHeaders, requestMethod, authorizedAPIKey"); }
+   { throw new Error("Parameter Error: targetURL, baseURL, requestHeaders, requestMethod, authorizedAPIKey"); }
   
   let requestHeaders = sanitizedRequestHeaders(_requestHeaders);
   if (requestMethod !== "GET") {
@@ -200,7 +215,10 @@ async function getFeed(targetURL,
     
     // Download and Rewrite XML
     const originalXML = await response.text();
-    const rewrittenXML = rewriteFeedXML(originalXML, requestURL, authorizedAPIKey);
+    const rewrittenXML = await rewriteFeedXML(originalXML, 
+                                              targetURL, 
+                                              baseURL, 
+                                              authorizedAPIKey);
     
     // Return Response
     const rewrittenXMLSize = new TextEncoder().encode(rewrittenXML).length;
@@ -214,7 +232,56 @@ async function getFeed(targetURL,
     });
   } catch (error) {
     console.error(`[proxy.feed] fetch() ${error.message}`);
-    return Auth.errorTargetUnreachable(requestURL.pathname);
+    return Auth.errorTargetUnreachable(targetURL.pathname);
+  }
+}
+
+async function getHTML(targetURL, 
+                       baseURL,
+                      _requestHeaders,
+                       requestMethod, 
+                       authorizedAPIKey) 
+{
+  if (!(targetURL instanceof URL)
+   || !(baseURL instanceof URL)
+   || !_requestHeaders
+   || !requestMethod
+   || typeof authorizedAPIKey !== "string") 
+   { throw new Error("Parameter Error: targetURL, baseURL, requestHeaders, requestMethod, authorizedAPIKey"); }
+  
+  let requestHeaders = sanitizedRequestHeaders(_requestHeaders);
+  if (requestMethod !== "GET") {
+    // Bail out immediately if we are 
+    // not proxying a normal GET request
+    return fetch(targetURL, {
+      method: requestMethod,
+      headers: requestHeaders,
+      redirect: 'follow'
+    });
+  }
+  
+  console.log(`[proxy.html] rewrite-start: ${targetURL.toString()}`);
+  try {
+    const response = await fetch(targetURL, {
+      method: requestMethod,
+      headers: sanitizedRequestHeaders(_requestHeaders),
+      redirect: 'follow'
+    });
+
+    if (!response.ok) return response;
+    const rewrittenResponse = rewriteHTML(response, 
+                                          targetURL, 
+                                          baseURL, 
+                                          authorizedAPIKey);
+    const responseHeaders = sanitizedResponseHeaders(rewrittenResponse.headers);
+    responseHeaders.set('Content-Type', 'text/html; charset=utf-8');
+    return new Response(rewrittenResponse.body, {
+      status: response.status,
+      headers: responseHeaders
+    });
+  } catch (error) {
+    console.error(`[proxy.html] error: ${error.message}`);
+    return Auth.errorTargetUnreachable(targetURL.pathname);
   }
 }
 
@@ -244,50 +311,57 @@ function getAsset(targetURL,
 
 // MARK: Model (Testable)
 
-export function rewriteFeedXML(originalXML, requestURL, authorizedAPIKey) {
+export async function rewriteFeedXML(originalXML, 
+                                     targetURL, 
+                                     baseURL, 
+                                     authorizedAPIKey) 
+{
+
+  async function XML_rewriteEntryHTML(entry) {
+    const fields = [
+      "description",       // RSS 2.0 Summary/Content
+      "content:encoded",   // RSS 2.0 Full Content
+      "content",           // Atom Full Content
+      "summary"            // Atom Summary
+    ];
+    for (const field of fields) {
+      if (!entry[field]) continue;
+      const isCDATA = (typeof entry[field] === "object" && entry[field]["__cdata"]) ;
+      const originalHTML = isCDATA ? entry[field]["__cdata"] : entry[field]
+      let rewrittenHTML = await rewriteHTMLString(originalHTML,
+                                                  targetURL, 
+                                                  baseURL, 
+                                                  authorizedAPIKey);
+      if (isCDATA) entry[field]["__cdata"] = rewrittenHTML;
+      else entry[field] = rewrittenHTML;
+    }
+  }
 
   function XML_encodeURL(parent, key, option, where) {
     if (!parent || !parent[key]) return;
     const target = parent[key];
-    // 1. Handle Array Case (Recursive)
     if (Array.isArray(target)) {
-      target.forEach((_, index) => {
-        // We pass the array as the parent and the index as the key
-        X_setURL(target, index, option, where);
-      });
+      target.forEach((_, index) => XML_encodeURL(target, index, option, where));
       return;
     }
-    // 2. Apply Predicate (where clause)
-    // We pass 'parent' so the caller can check siblings or attributes
     if (where && !where(parent)) return;
-    const original = target;
-    // 3. Extract raw string (handle CDATA vs String)
-    const rawValue = (typeof original === "object" && original.__cdata) 
-                     ? original.__cdata 
-                     : original;
+    const rawValue = (typeof target === "object" && target.__cdata) ? target.__cdata : target;
     if (typeof rawValue !== "string") return;
-    // 4. Parse and Trim (Fixes Arms Control Wonk whitespace)
-    const rawValueURL = URL.parse(rawValue.trim());
-    if (!rawValueURL) return;
-    // 5. Encode
-    const resultURL = encode(rawValueURL, requestURL, option, authorizedAPIKey);
-    if (!(resultURL instanceof URL)) return;
-    const finalString = resultURL.toString();
-    // 6. Re-wrap in original format
-    parent[key] = (typeof original === "object" && "__cdata" in original)
-      ? { "__cdata": finalString }
-      : finalString;
+    const rawURL = URL.parse(rawValue.trim());
+    if (!rawURL) return;
+    const finalURL = encode(rawURL, baseURL, option, authorizedAPIKey).toString();
+    parent[key] = (typeof target === "object" && "__cdata" in target) ? { "__cdata": finalURL } : finalURL;
   }
   
-  if (!(requestURL instanceof URL)
+  if (!(baseURL instanceof URL)
    || typeof originalXML !== "string"
    || typeof authorizedAPIKey !== "string") 
-  { throw new Error("Parameter Error: requestURL, originalXML, authorizedAPIKey"); }
+  { throw new Error("Parameter Error: baseURL, originalXML, authorizedAPIKey"); }
 
 
   // 1. Set time limit for articles
   const timelimit = new Date();
-  timelimit.setMonth(timelimit.getMonth() - 6);
+  timelimit.setMonth(timelimit.getMonth() - 12);
   
   // 2. Create Parser and Builder
   const parser = new XMLParser({ 
@@ -307,9 +381,9 @@ export function rewriteFeedXML(originalXML, requestURL, authorizedAPIKey) {
   // Start Processing
   let xml = parser.parse(originalXML);
   if (xml["?xml-stylesheet"]) delete xml["?xml-stylesheet"]; // Delete any stylesheet
-  const rssChannel = xml.rss?.channel;
   
   // 3 Patch the Atom Channel
+  const rssChannel = xml.rss?.channel;
   if (rssChannel) {
     // 3.1 Replace itunes:new-feed-url
     XML_encodeURL(rssChannel, "itunes:new-feed-url", Option.feed);
@@ -329,27 +403,27 @@ export function rewriteFeedXML(originalXML, requestURL, authorizedAPIKey) {
       XML_encodeURL(image, "url", Option.asset);
       XML_encodeURL(image, "link", Option.auto);
     });
-    // 3.6 Remove items over 1 year old
-    rssChannel.item = rssChannel.item.filter(item => {
-      const pubDate = new Date(item.pubDate);
-      return pubDate > timelimit;
-    });
     
     // 4 Patch each item in the channel
     if (!Array.isArray(rssChannel.item)) rssChannel.item = (rssChannel.item) 
                                                    ? [rssChannel.item] 
                                                    : [];
-    rssChannel.item.forEach(item => {
-      // 4.1 Replace the Link property
-      XML_encodeURL(item, "link", Option.auto);
-      // 4.2 Replace the itunes image url
-      XML_encodeURL(item["itunes:image"], "@_href", Option.asset);
-      // 4.3 Replace enclosure url
-      XML_encodeURL(item.enclosure, "@_url", Option.asset);
-      // 4.4 TODO: Edit the Content tag as if it were HTML
+    // 4.1 Remove items older than the time limit
+    rssChannel.item = rssChannel.item.filter(item => {
+      const pubDate = new Date(item.pubDate);
+      return pubDate > timelimit;
     });
+    for (const item of rssChannel.item) {
+      // 4.2 Replace the Link property
+      XML_encodeURL(item, "link", Option.auto);
+      // 4.3 Replace the itunes image url
+      XML_encodeURL(item["itunes:image"], "@_href", Option.asset);
+      // 4.4 Replace enclosure url
+      XML_encodeURL(item.enclosure, "@_url", Option.asset);
+      // 4.5 Rewrite the HTML in summaries and descriptions
+      await XML_rewriteEntryHTML(item);
+    }
   }
-  
   const rssFeed = xml.feed;
   // 5 Patch the RSS feed
   if (rssFeed) {
@@ -369,7 +443,7 @@ export function rewriteFeedXML(originalXML, requestURL, authorizedAPIKey) {
       if (link["@_type"]?.toLowerCase().includes("image")) option = Option.asset;
       if (link["@_rel" ]?.toLowerCase().includes("self" )) option = Option.feed;
       link["@_href"] = encode(linkURL, 
-                              requestURL, 
+                              baseURL, 
                               option,
                               authorizedAPIKey)
                              .toString();
@@ -383,13 +457,14 @@ export function rewriteFeedXML(originalXML, requestURL, authorizedAPIKey) {
     if (!Array.isArray(rssFeed.entry)) rssFeed.entry = (rssFeed.entry) 
                                                ? [rssFeed.entry] 
                                                : [];
+    // 6.1 Remove items older than the time limit
     rssFeed.entry = rssFeed.entry.filter(item => {
       const updated = new Date(item.updated);
       return updated > timelimit;
     });
     
-    // 6.1 Patch each link entry
-    rssFeed.entry.forEach(entry => {
+    // 6.2 Patch each link entry
+    for (const entry of rssFeed.entry) {
       if (!Array.isArray(entry.link)) entry.link = (entry.link) 
                                                  ? [entry.link] 
                                                  : [];
@@ -405,30 +480,148 @@ export function rewriteFeedXML(originalXML, requestURL, authorizedAPIKey) {
         if (link["@_type"]?.toLowerCase().includes("audio")) option = Option.asset;
         if (link["@_type"]?.toLowerCase().includes("image")) option = Option.asset;
         link["@_href"] = encode(linkURL, 
-                                requestURL, 
+                                baseURL, 
                                 option,
                                 authorizedAPIKey)
                                .toString();
       });
       
-      // 6.2 TODO: Edit the Content tag as if it were HTML
-    });
+      // 6.3 Rewrite the HTML in summaries and descriptions
+      await XML_rewriteEntryHTML(entry);
+    }
   }
 
-  // 4. Return the modified XML Response
-  const rewrittenXML = builder.build(xml);
-  return rewrittenXML;
+  return builder.build(xml);
+}
+
+async function rewriteHTMLString(htmlString, targetURL, baseURL, authorizedAPIKey) {
+  if (!htmlString || typeof htmlString !== 'string') return htmlString;
+  const tempResponse = new Response(htmlString);
+  const transformed = rewriteHTML(tempResponse, targetURL, baseURL, authorizedAPIKey);
+  return await transformed.text();
+}
+
+export function rewriteHTML(response, 
+                           _targetURL,
+                            baseURL, 
+                            authorizedAPIKey) 
+{
+  const removeScripts = new XP_HTMLRewriter()
+    .on('script',   { element: el => el.remove() })
+    .on('noscript',   { element: el => el.removeAndKeepContent() })
+    .transform(response);
+  
+  return new XP_HTMLRewriter()
+    // Rewrite Links
+    .on('a', {
+      element(el) {
+        const href = el.getAttribute('href');
+        if (href) {
+          const target = URL.parse(href, _targetURL);
+          if (target) {
+            const proxied = encode(target, baseURL, Option.auto, authorizedAPIKey);
+            el.setAttribute('href', proxied.toString());
+          }
+        }
+      }
+    })
+    // Rewrite onClick and other on functions
+    .on('*', {
+      element(el) {
+        // el.attributes is an iterator of [name, value]
+        for (const [name] of el.attributes) {
+          if (name.startsWith('on')) {
+            el.removeAttribute(name);
+          }
+        }
+      }
+    })
+    // Rewrite Assets
+    .on('img, video, audio, source', {
+      element(el) {
+        const src = el.getAttribute('src');
+        if (src) {
+          const target = URL.parse(src, _targetURL);
+          if (target) {
+            const proxied = encode(target, baseURL, Option.asset, authorizedAPIKey);
+            el.setAttribute('src', proxied.toString());
+          }
+        }
+      }
+    })
+    // Rewrite Stylesheets
+    .on('link[rel="stylesheet"]', {
+      element(el) {
+        const href = el.getAttribute('href');
+        if (href) {
+          const target = URL.parse(href, _targetURL);
+          if (target) {
+            const proxied = encode(target, baseURL, Option.asset, authorizedAPIKey);
+            el.setAttribute('href', proxied.toString());
+          }
+        }
+      }
+    })
+    // Rewrite SRCSETS (choose the best picture under 1000px)
+    .on('img, source', {
+      element(el) {
+        const srcset = el.getAttribute('srcset');
+        
+        if (srcset) {
+          // 1. Split into individual candidates
+          const candidates = srcset.split(',').map(entry => {
+            const parts = entry.trim().split(/\s+/);
+            const url = parts[0];
+            // Parse width (e.g., "1080w" -> 1080). Default to 0 if not found.
+            const width = parts[1] && parts[1].endsWith('w') 
+                          ? parseInt(parts[1].slice(0, -1), 10) 
+                          : 0;
+            return { url, width };
+          });
+    
+          // 2. Filter for those under 1000px, then sort descending (largest first)
+          const suitable = candidates
+            .filter(c => c.width > 0 && c.width <= 1000)
+            .sort((a, b) => b.width - a.width);
+    
+          // 3. Choose the winner
+          // If we found one under 1000, take the largest of those.
+          // Otherwise, fallback to the first one in the original list (usually the smallest).
+          const winner = suitable.length > 0 ? suitable[0] : candidates[0];
+    
+          if (winner && winner.url) {
+            const target = URL.parse(winner.url, _targetURL);
+            if (target) {
+              const proxied = encode(target, baseURL, Option.asset, authorizedAPIKey);
+              el.setAttribute('src', proxied.toString());
+            }
+          }
+    
+          // 4. ALWAYS remove the original srcset
+          // This stops modern-ish retro browsers from trying to be "smart"
+          el.removeAttribute('srcset');
+          el.removeAttribute('sizes');
+        } else {
+          // ... existing src-only rewriting logic ...
+        }
+      }
+    })
+    .transform(removeScripts);
 }
 
 export function encode(targetURL, 
-                       requestURL, 
+                       baseURL, 
                        targetOption, 
                        authorizedAPIKey) 
 {  
   if (!(targetURL  instanceof URL)
-   || !(requestURL instanceof URL)
+   || !(baseURL instanceof URL)
    || typeof authorizedAPIKey !== "string") 
-  { throw new Error(`Parameter Error: targetURL(${targetURL}), requestURL(${requestURL}), targetOption(${targetOption}), authorizedAPIKey(${authorizedAPIKey})`); }
+  { throw new Error(`Parameter Error: targetURL(${targetURL}), baseURL(${baseURL}), targetOption(${targetOption}), authorizedAPIKey(${authorizedAPIKey})`); }
+  
+  if (!baseURL.toString().endsWith(Auth.PROXY_VALID_PATH)) {
+    console.log(`[WARNING] BaseURL does not end with ${Auth.PROXY_VALID_PATH}: ${baseURL.toString()}`);
+  }
   
   // get the target filename
   const pathComponents = targetURL.pathname.split('/');
@@ -440,11 +633,10 @@ export function encode(targetURL,
   const targetEncoded = encodeURIComponent(targetBase);
   
   // construct the encoded url
-  // TODO: replace requestURL with baseURL and then use JS constructor to append path properly
-  // https://developer.mozilla.org/en-US/docs/Web/API/URL_API/Resolving_relative_references
-  let encodedURLString = `${requestURL.protocol}//${requestURL.host}${Auth.PROXY_VALID_PATH}${targetEncoded}/${fileName}?key=${authorizedAPIKey}`;
-  if (targetOption) encodedURLString+= `&option=${targetOption}`
-  const encodedURL = new URL(encodedURLString);
+  const encodedPath = `${targetEncoded}/${fileName}`;
+  const encodedURL = new URL(encodedPath, baseURL);
+  encodedURL.searchParams.set("key", authorizedAPIKey);
+  if (targetOption) encodedURL.searchParams.set("option", targetOption);
   
   // TODO: Remove the excess logging
   console.log(`[proxy.encode] ${targetURL.toString()}`);
@@ -530,11 +722,5 @@ export function sanitizedResponseHeaders(incomingHeaders) {
       headers.set(key, value);
     }
   }
-  
-  // Optional: Set a User-Agent so sites don't block you as a bot
-  if (!headers.has('user-agent')) {
-    headers.set('User-Agent', 'Overcast/3.0 (+http://overcast.fm/; iOS podcast app)');
-  }
-
   return headers;
 }
