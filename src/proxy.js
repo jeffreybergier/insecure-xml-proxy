@@ -350,7 +350,7 @@ export async function rewriteFeedXML(originalXML,
 
   // 1. Set time limit for articles
   const timelimit = new Date();
-  timelimit.setMonth(timelimit.getMonth() - 6);
+  timelimit.setMonth(timelimit.getMonth() - 12);
   
   // 2. Create Parser and Builder
   const parser = new XMLParser({ 
