@@ -4,13 +4,14 @@
     <title>Original Test Feeds</title>
   </head>
   <body>
-    <outline text="RSS Feeds" title="RSS Feeds">
+    <outline text="Feeds" title="Feeds">
       <outline type="rss" text="The Verge" xmlUrl="https://www.theverge.com/rss/index.xml" />
       <outline type="rss" text="MacRumors" xmlUrl="https://www.macrumors.com/macrumors.xml" />
       <outline type="rss" text="Daring Fireball" xmlUrl="https://daringfireball.net/feeds/main" />
       <outline type="rss" text="It's Nice That" xmlUrl="https://feeds2.feedburner.com/itsnicethat/SlXC" />
       <outline type="rss" text="Nomadic Matt" xmlUrl="https://www.nomadicmatt.com/feed/" />
       <outline type="rss" text="Xkcd" xmlUrl="https://xkcd.com/rss.xml" />
+      <outline type="rss" text="What If?" xmlUrl="https://what-if.xkcd.com/feed.atom" />
       <outline type="rss" text="Vienna Support" xmlUrl="https://github.com/ViennaRSS/vienna-rss/discussions.atom" />
       <outline type="rss" text="A Working Library" xmlUrl="https://aworkinglibrary.com/feed/index.xml" />
       <outline type="rss" text="Vienna Developer Blog" xmlUrl="https://www.vienna-rss.com/feed.xml" />
@@ -33,13 +34,13 @@
       <outline type="rss" text="Mac OTAKARA" xmlUrl="https://www.macotakara.jp/rss2.xml" />
     </outline>
 
-    <outline text="Troublesome RSS" title="Troublesome RSS">
+    <outline text="Feeds (Troublesome)" title="Feeds (Troublesome)">
       <outline type="rss" text="Amusing Planet" xmlUrl="https://www.amusingplanet.com/feeds/posts/default?alt=rss" />
       <outline type="rss" text="Apple News" xmlUrl="https://www.apple.com/newsroom/rss-feed.rss" />
       <outline type="rss" text="Allen Pike" xmlUrl="https://feeds.allenpike.com/feed/" />
     </outline>
 
-    <outline text="Podcast Feeds" title="Podcast Feeds">
+    <outline text="Podcasts" title="Podcasts">
       <outline type="rss" text="Accidental Tech Podcast" xmlUrl="https://atp.fm/rss" />
       <outline type="rss" text="ArchaeoEd Podcast" xmlUrl="https://feeds.buzzsprout.com/1314529.rss" />
       <outline type="rss" text="Arms Control Wonk" xmlUrl="https://armscontrolwonk.libsyn.com/rss" />
@@ -65,7 +66,7 @@
       <outline type="rss" text="日本語 with あこ" xmlUrl="https://anchor.fm/s/2e08a010/podcast/rss" />
     </outline>
 
-    <outline text="Troublesome Podcast Feeds" title="Troublesome Podcast Feeds">
+    <outline text="Podcasts (Troublesome)" title="Podcasts (Troublesome)">
       <outline type="rss" text="Acquired" xmlUrl="https://feeds.transistor.fm/acquired" />
       <outline type="rss" text="All-In" xmlUrl="https://rss.libsyn.com/shows/254861/destinations/1928300.xml" />
       <outline type="rss" text="Apple News Today" xmlUrl="https://apple.news/podcast/apple_news_today" />

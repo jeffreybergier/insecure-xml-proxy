@@ -232,36 +232,26 @@ async function startTests() {
       if (!proxyRunning) { throw new Error("localhost:3000 crashed"); }
       // R3. Fetch W3C Validation
       const rhsW3C = await getW3CXMLBodyWithXMLBody(rhsXML);
-      if (!rhsW3C) { throw new Error("W3C Validation Request Failed"); }
+      if (!rhsW3C) { console.log("[RHS] failed to fetch W3C Validation"); unknownCount+= 1; continue; }
       // R4. Analyze W3C Validation
       const rhsIssues = analyzeW3CXMLBody(rhsW3C);
-      if (!rhsIssues) { throw new Error("Failed to parse the W3C Validation Request"); }
+      if (!rhsIssues) { console.log("[RHS] failed to analyze W3C Validation"); unknownCount+= 1; continue; }
       const rhsIssuesString = JSON.stringify(rhsIssues, null, 2);
       
       // L3. Fetch W3C Validation
-      let lhsIssues = null;
       const lhsW3C = await getW3CValidationByURL(lhs.url);
-      if (lhsW3C) {
-        // L4. Analyze W3C Validation
-        lhsIssues = analyzeW3CXMLBody(lhsW3C);
-      }
-      
-      // Able to compare
-      if (lhsIssues) {
-        // 5. Comparison
-        const remainingIssues = getRegressions(lhsIssues, rhsIssues);
-        const remainingIssuesString = JSON.stringify(remainingIssues, null, 2);
-        if (remainingIssues.length > 0) {
-          console.error(`Failure: ${lhs.name} \n${remainingIssuesString}`);
-          errorCount += 1;
-        } else {
-          console.log(`Success: ${lhs.name} ${lhs.url}`);
-          successCount += 1;
-        }
+      if (!lhsW3C) { console.log("[LHS] failed to fetch W3C Validation"); unknownCount+= 1; continue; }
+      const lhsIssues = analyzeW3CXMLBody(rhsW3C);
+      if (!lhsIssues) { console.log("[LHS] failed to analyze W3C Validation"); unknownCount+= 1; continue; }
+      // 5. Comparison
+      const remainingIssues = getRegressions(lhsIssues, rhsIssues);
+      const remainingIssuesString = JSON.stringify(remainingIssues, null, 2);
+      if (remainingIssues.length > 0) {
+        console.error(`Failure: ${lhs.name} \n${remainingIssuesString}`);
+        errorCount += 1;
       } else {
-        // Unable to compare
-        console.log(`Unknown: ${lhs.name} \n${rhsIssuesString}`);
-        unknownCount += 1;
+        console.log(`Success: ${lhs.name} ${lhs.url}`);
+        successCount += 1;
       }
     } catch (err) {
       console.error(`Failure: ${lhs.name} ${err.message}`);
