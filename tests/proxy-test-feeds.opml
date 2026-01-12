@@ -32,6 +32,9 @@
       <outline type="rss" text="Six Colors" xmlUrl="https://feedpress.me/sixcolors?type=xml" />
       <outline type="rss" text="RTINGS.com" xmlUrl="https://www.rtings.com/latest-rss" />
       <outline type="rss" text="Mac OTAKARA" xmlUrl="https://www.macotakara.jp/rss2.xml" />
+      <outline type="rss" text="Masto: Jeff Johnson" xmlUrl="https://mastodon.social/@lapcatsoftware.rss" />
+      <outline type="rss" text="Masto: Curt Clifton" xmlUrl="https://indieweb.social/@curtclifton.rss" />
+      <outline type="rss" text="Masto: MEEE" xmlUrl="https://jeffburg.social/@jeff.rss" />
     </outline>
 
     <outline text="Feeds (Troublesome)" title="Feeds (Troublesome)">
