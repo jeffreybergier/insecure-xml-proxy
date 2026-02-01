@@ -338,12 +338,13 @@ export async function rewriteFeedXML(originalXML,
   }
 
   function XML_encodeURL(parent, key, option, where) {
-    if (!parent || !parent[key]) return;
-    const target = parent[key];
-    if (Array.isArray(target)) {
-      target.forEach((_, index) => XML_encodeURL(target, index, option, where));
+    if (!parent) return;
+    if (Array.isArray(parent)) {
+      parent.forEach(item => XML_encodeURL(item, key, option, where));
       return;
     }
+    const target = parent[key];
+    if (!target) return;
     if (where && !where(parent)) return;
     const rawValue = (typeof target === "object" && target.__cdata) ? target.__cdata : target;
     if (typeof rawValue !== "string") return;
@@ -392,18 +393,12 @@ export async function rewriteFeedXML(originalXML,
     // 3.3 Replace Links
     XML_encodeURL(rssChannel, "link", Option.auto);
     // 3.4 Replace Self Link
-    XML_encodeURL(rssChannel["atom:link"], "@_href", Option.feed, parent => {
-      return parent["@_rel"] === "self";
+    XML_encodeURL(rssChannel["atom:link"], "@_href", Option.feed, item => {
+      return item["@_rel"] === "self";
     });
     // 3.5 Replace the channel image
-    if (!Array.isArray(rssChannel.image)) rssChannel.image = (rssChannel.image) 
-                                                           ? [rssChannel.image] 
-                                                           : [];
-    rssChannel.image.forEach(image => {
-      XML_encodeURL(image, "url", Option.asset);
-      XML_encodeURL(image, "link", Option.auto);
-    });
-    
+    XML_encodeURL(rssChannel.image, "url", Option.asset);
+    XML_encodeURL(rssChannel.image, "link", Option.auto);
     // 4 Patch each item in the channel
     if (!Array.isArray(rssChannel.item)) rssChannel.item = (rssChannel.item) 
                                                    ? [rssChannel.item] 
