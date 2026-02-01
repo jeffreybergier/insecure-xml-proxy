@@ -385,8 +385,8 @@ export async function rewriteFeedXML(originalXML,
   // 3 Patch the Atom Channel
   const rssChannel = xml.rss?.channel;
   if (rssChannel) {
-    // 3.1 Replace itunes:new-feed-url
-    XML_encodeURL(rssChannel, "itunes:new-feed-url", Option.feed);
+    // 3.1 Delete itunes:new-feed-url
+    delete rssChannel["itunes:new-feed-url"];
     // 3.2 Replace itunes:image
     XML_encodeURL(rssChannel["itunes:image"], "@_href", Option.asset);
     // 3.3 Replace Links
