@@ -324,15 +324,21 @@ function getImage(targetURL,
    || typeof authorizedAPIKey !== "string") 
   { throw new Error("Parameter Error: targetURL, requestHeaders, requestMethod, authorizedAPIKey"); }
   
-  // TODO: Change this to download the image and then resize it to be 1024px or less
   const headers = sanitizedRequestHeaders(requestHeaders);
-  console.log(`[proxy.image] passing through: ${targetURL.toString()}`);
   
-  // TODO: Add cache-control
-  return fetch(targetURL, {
-    method: requestMethod,
+  // Image Resizing with Cloudflare
+  const wsrvURL = new URL("https://wsrv.nl/");
+  wsrvURL.searchParams.set("url", targetURL.toString());
+  wsrvURL.searchParams.set("w", "1024");
+  wsrvURL.searchParams.set("h", "1024");
+  wsrvURL.searchParams.set("fit", "inside");
+  wsrvURL.searchParams.set("we", "1");    // Don't enlarge smaller images
+  wsrvURL.searchParams.set("output", "jpg");
+  wsrvURL.searchParams.set("q", "75");
+  console.log(`[proxy.image] resizing via wsrv.nl: ${targetURL.toString()}`);
+  
+  return fetch(wsrvURL, {
     headers: headers,
-    redirect: 'follow'
   });
 }
 
