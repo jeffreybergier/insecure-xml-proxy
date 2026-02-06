@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import http from 'node:http';
 import * as Router from './router.js';
+import * as XP from './xp.js';
 
 const hostname = 'localhost';
 const port = process.env.PORT || 3000;
@@ -8,6 +9,7 @@ const requestEnv = {
   VALID_KEYS: process.env.VALID_KEYS || "[]"
 };
 
+XP.initKV(null);
 const server = http.createServer(async (req, res) => {
   // 1. Wrap the raw 'req' in a standard 'Request'
   const webReq = new Request(`http://${req.headers.host}${req.url}`, {
