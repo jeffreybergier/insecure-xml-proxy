@@ -6,8 +6,8 @@
     "start": "node ./src/_node-boot.js"
   },
   "dependencies": {
+    "@miniflare/html-rewriter": "^2.14.4",
     "dotenv": "^17.2.3",
-    "fast-xml-parser": "^5.3.3",
-    "htmlrewriter": "^0.0.13"
+    "fast-xml-parser": "^5.3.3"
   }
 }

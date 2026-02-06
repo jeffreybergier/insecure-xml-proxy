@@ -3,5 +3,9 @@ main = "src/_cloudflare.js"
 compatibility_date = "2025-12-14"
 workers_dev = true
 
+[[kv_namespaces]]
+binding = "URL_STORE"
+id = "8fe18cadc1d94614af65e1699bf07457"
+
 [observability]
 enabled = true
