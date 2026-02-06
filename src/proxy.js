@@ -713,24 +713,43 @@ export async function encode(targetURL,
   }
   
   // get the target filename
+  const targetURLString = targetURL.toString();
   const pathComponents = targetURL.pathname.split('/');
-  let fileName = pathComponents.filter(Boolean).pop() || "";
+  const fileName = pathComponents.filter(Boolean).pop() || "";
+  let encodedURL;
   
-  // encode the targetURL
-  const targetURI = encodeURIComponent(targetURL.toString());
-  const targetBase = btoa(targetURI);
-  const targetEncoded = encodeURIComponent(targetBase);
-  
-  // construct the encoded url
-  const encodedPath = `${targetEncoded}/${fileName}`;
-  const encodedURL = new URL(encodedPath, baseURL);
-  encodedURL.searchParams.set("key", authorizedAPIKey);
-  if (targetOption) encodedURL.searchParams.set("option", targetOption);
-  
-  const encodedURLLength = encodedURL.toString().length;
-  if (encodedURLLength >= 255) {
-    console.error(`[proxy.encode.WARN] ENCODED-LENGTH(${encodedURLLength}) ${targetURL.toString()}`);
+  {
+    // encode the targetURL
+    const targetURI = encodeURIComponent(targetURLString);
+    const targetBase = btoa(targetURI);
+    const targetEncoded = encodeURIComponent(targetBase);
+    
+    // construct the encoded url
+    const encodedPath = `${targetEncoded}/${fileName}`;
+    encodedURL = new URL(encodedPath, baseURL);
+    encodedURL.searchParams.set("key", authorizedAPIKey);
+    if (targetOption) encodedURL.searchParams.set("option", targetOption);
   }
+  
+  const encodedURLString = encodedURL.toString()
+  const encodedURLLength = encodedURLString.length;
+  if (encodedURLLength >= 255) {
+    if (XP.KVS) {
+      // hash the targetURL
+      const targetEncoded = await XP.md5(targetURLString);
+      await XP.KVS.put(targetEncoded, targetURLString);
+      
+      // construct the encoded url
+      const encodedPath = `${targetEncoded}/${fileName}`;
+      encodedURL = new URL(encodedPath, baseURL);
+      encodedURL.searchParams.set("key", authorizedAPIKey);
+      if (targetOption) encodedURL.searchParams.set("option", targetOption);
+      console.log(`[proxy.encode] Saved to KVS ${targetURLString}`);
+    } else {
+      console.error(`[proxy.encode.WARN] ENCODED-LENGTH(${encodedURLLength}) ${targetURLString}`);
+    }
+  }
+  
   return encodedURL;
 }
 
@@ -750,11 +769,30 @@ export async function decode(requestURL) {
     return null; 
   }
   const targetEncoded = pathComponents[proxyIndex + 1];
-
+  
+  let targetURLString = null;
+  
+  // First try to fetch from KVS
   try {
-    const targetBase = decodeURIComponent(targetEncoded);
-    const targetURI = atob(targetBase);
-    const targetURLString = decodeURIComponent(targetURI);
+      targetURLString = await XP.KVS.get(targetEncoded);
+      console.log(`[proxy.decode] KVS.get ${targetURLString}`);
+    } catch (error) {
+      console.error(`[proxy.decode] KVS.get failed ${error.message}`);
+    }
+  
+  // Second try to decode the Base64
+  if (!targetURLString) {
+    try {
+      const targetBase = decodeURIComponent(targetEncoded);
+      const targetURI = atob(targetBase);
+      targetURLString = decodeURIComponent(targetURI);
+      console.log(`[proxy.decode] Base64 ${targetURLString}`);
+    } catch (error) {
+      console.error(`[proxy.decode] Base64 failed ${error.message}`);
+    }
+  }
+  
+  try {
     const targetURL = new URL(targetURLString);
     console.log(`[proxy.decode] ${targetURLString}`);
     return targetURL;
