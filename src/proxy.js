@@ -6,8 +6,8 @@ if (globalThis.HTMLRewriter) {
   console.log("[proxy] Using HTMLRewriter from Cloudflare");
   XP_HTMLRewriter = globalThis.HTMLRewriter;
 } else {
-  console.log("[proxy] Using HTMLRewriter from Node.js");
-  const packageName = "htmlrewriter"; 
+  console.log("[proxy] Using HTMLRewriter from @miniflare");
+  const packageName = "@miniflare/html-rewriter"; 
   const mod = await import(packageName);
   XP_HTMLRewriter = mod.HTMLRewriter;
 }
