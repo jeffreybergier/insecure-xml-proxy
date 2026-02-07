@@ -664,61 +664,13 @@ export function encode(targetURL,
     console.log(`[WARNING] BaseURL does not end with ${Auth.PROXY_VALID_PATH}: ${baseURL.toString()}`);
   }
   
-   // HACK for Podtrac - it often makes URLs that are too long
-  if (targetURL.hostname.includes("podtrac.com") && 
-      targetURL.pathname.startsWith("/redirect.mp3")) 
-  {
-    const hostingMarkers = [
-      "stitcher.simplecastaudio.com",
-      "traffic.libsyn.com",
-      "traffic.megaphone.fm",
-      "api.spreaker.com",
-      "traffic.omny.fm",
-    ];
-    const urlString = targetURL.toString();
-    for (const marker of hostingMarkers) {
-      if (urlString.includes(marker)) {
-        console.log(`[proxy.encode] removed podtrac ${targetURL.toString()}`);
-        const [pathOnly] = urlString.split('?');
-        const startIndex = pathOnly.indexOf(marker);
-        const cleanPath = pathOnly.substring(startIndex);
-        targetURL = new URL("https://" + cleanPath);
-        break;
-      }
-    }
-  }
-  
-  // HACK for blubrry
-  if (targetURL.hostname.includes("media.blubrry.com")) {
-    const [pathOnly] = targetURL.toString().split('?');
-    const segments = pathOnly.split('/');
-    // Pattern: https://media.blubrry.com/SLUG/REAL_DOMAIN/PATH
-    // Segments: ["https:", "", "media.blubrry.com", "SLUG", "REAL_DOMAIN", ...]
-    if (segments.length > 4) {
-      console.log(`[proxy.encode] removed blubrry ${targetURL.toString()}`);
-      targetURL = new URL("https://" + segments.slice(4).join('/'));
-    }
-  }
-  
-  // HACK pscrb.fm
-  if (targetURL.hostname.includes("pscrb.fm")) {
-    const urlString = targetURL.toString();
-    const marker = "waaa.wnyc.org";
-    if (urlString.includes(marker)) {
-      console.log(`[proxy.encode] removed pscrb.fm ${targetURL.toString()}`);
-      const [pathOnly] = urlString.split('?');
-      const startIndex = pathOnly.indexOf(marker);
-      const cleanPath = pathOnly.substring(startIndex);
-      targetURL = new URL("https://" + cleanPath);
-    }
-  }
-  
   // get the target filename
-  const pathComponents = targetURL.pathname.split('/');
+  const strippedTargetURL = stripTracking(targetURL);
+  const pathComponents = strippedTargetURL.pathname.split('/');
   let fileName = pathComponents.filter(Boolean).pop() || "";
   
   // encode the targetURL
-  const targetURI = encodeURIComponent(targetURL.toString());
+  const targetURI = encodeURIComponent(strippedTargetURL.toString());
   const targetBase = btoa(targetURI);
   const targetEncoded = encodeURIComponent(targetBase);
   
@@ -750,13 +702,14 @@ export async function encodeHeavy(targetURL,
   
   if (encodedURL.toString().length >= 255 && XP.KVS) {
     // hash the targetURL
-    const targetURLString = targetURL.toString();
+    const strippedTargetURL = stripTracking(targetURL);
+    const targetURLString = strippedTargetURL.toString();
     const _targetEncoded = await XP.md5(targetURLString);
     const targetEncoded = "KV-" + _targetEncoded;
     await XP.KVS.put(targetEncoded, targetURLString);
     
     // get the target filename
-    const pathComponents = targetURL.pathname.split('/');
+    const pathComponents = strippedTargetURL.pathname.split('/');
     const fileName = pathComponents.filter(Boolean).pop() || "";
     
     // construct the encoded url
@@ -812,6 +765,57 @@ export async function decode(requestURL) {
     console.error(`[proxy.decode] Base64 failed ${error.message}`);
     return null;
   }
+}
+
+/**
+ * Strips tracking and redirection wrappers from common podcast hosts 
+ * to shorten URLs for legacy hardware compatibility.
+ */
+function stripTracking(targetURL) {
+  if (!(targetURL instanceof URL)) return targetURL;
+  let urlString = targetURL.toString();
+
+  // 1. HACK for Podtrac
+  if (targetURL.hostname.includes("podtrac.com") && targetURL.pathname.startsWith("/redirect.mp3")) {
+    const hostingMarkers = [
+      "stitcher.simplecastaudio.com",
+      "traffic.libsyn.com",
+      "traffic.megaphone.fm",
+      "api.spreaker.com",
+      "traffic.omny.fm",
+    ];
+    for (const marker of hostingMarkers) {
+      if (urlString.includes(marker)) {
+        const [pathOnly] = urlString.split('?');
+        const startIndex = pathOnly.indexOf(marker);
+        console.log(`[proxy.strip] removed podtrac wrapper`);
+        return new URL("https://" + pathOnly.substring(startIndex));
+      }
+    }
+  }
+
+  // 2. HACK for Blubrry
+  if (targetURL.hostname.includes("media.blubrry.com")) {
+    const [pathOnly] = urlString.split('?');
+    const segments = pathOnly.split('/');
+    if (segments.length > 4) {
+      console.log(`[proxy.strip] removed blubrry wrapper`);
+      return new URL("https://" + segments.slice(4).join('/'));
+    }
+  }
+
+  // 3. HACK for pscrb.fm (WNYC/New York Public Radio)
+  if (targetURL.hostname.includes("pscrb.fm")) {
+    const marker = "waaa.wnyc.org";
+    if (urlString.includes(marker)) {
+      const [pathOnly] = urlString.split('?');
+      const startIndex = pathOnly.indexOf(marker);
+      console.log(`[proxy.strip] removed pscrb.fm wrapper`);
+      return new URL("https://" + pathOnly.substring(startIndex));
+    }
+  }
+
+  return targetURL;
 }
 
 export function sanitizedRequestHeaders(incomingHeaders) {
