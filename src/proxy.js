@@ -39,13 +39,31 @@ Object.freeze(Option);
 
 // MARK: Controller
 
+function isLegacyUserAgent(userAgent) {
+  if (typeof userAgent !== 'string') return true;
+  const legacyAgents = [
+    "iTunes/10",
+    "iTunes/9",
+    "iTunes/8",
+    "iTunes/7",
+    "iTunes/6",
+    "iTunes/5",
+    "iTunes/4",
+    "iTunes/3",
+    "iTunes/2",
+    "iTunes/1",
+  ];
+  return legacyAgents.some(s => userAgent.includes(s));
+}
+
 export async function getProxyResponse(request) {
 
   // 0. URL Parameters
-  const requestURL = new URL(request.url);
-  const baseURL = new URL(Auth.PROXY_VALID_PATH, requestURL.origin);
-  const _targetURL = await decode(requestURL);
-  const _submittedURL = URL.parse(requestURL.searchParams.get('url'));
+  const requestURL     = new URL(request.url);
+  const baseURL        = new URL(Auth.PROXY_VALID_PATH, requestURL.origin);
+  const _targetURL     = await decode(requestURL);
+  const _submittedURL  = URL.parse(requestURL.searchParams.get('url'));
+  const isLegacyClient = isLegacyUserAgent(request.headers.get("User-Agent"));
   const targetURL = (_targetURL) 
                    ? _targetURL
                    : _submittedURL;
@@ -78,7 +96,8 @@ export async function getProxyResponse(request) {
                                              baseURL,
                                              request.headers,
                                              request.method, 
-                                             authorizedAPIKey);
+                                             authorizedAPIKey,
+                                             isLegacyClient);
   if (option === Option.asset) return getAsset(targetURL, 
                                                request.headers, 
                                                request.method, 
@@ -173,7 +192,8 @@ async function getFeed(targetURL,
                        baseURL,
                       _requestHeaders,
                        requestMethod, 
-                       authorizedAPIKey) 
+                       authorizedAPIKey,
+                       isLegacyClient) 
 {
   if (!(targetURL instanceof URL)
    || !(baseURL instanceof URL)
@@ -211,7 +231,8 @@ async function getFeed(targetURL,
     const rewrittenXML = await rewriteFeedXML(originalXML, 
                                               targetURL, 
                                               baseURL, 
-                                              authorizedAPIKey);
+                                              authorizedAPIKey,
+                                              isLegacyClient);
     
     // Return Response
     const rewrittenXMLSize = new TextEncoder().encode(rewrittenXML).length;
@@ -334,7 +355,8 @@ function getImage(targetURL,
 export async function rewriteFeedXML(originalXML, 
                                      targetURL, 
                                      baseURL, 
-                                     authorizedAPIKey) 
+                                     authorizedAPIKey,
+                                     isLegacyClient) 
 {
 
   async function XML_rewriteEntryHTML(entry) {
@@ -357,12 +379,11 @@ export async function rewriteFeedXML(originalXML,
     }
   }
 
-  async function XML_encodeURL(parent, key, option, _forITunes, where) {
-    const forITunes = (typeof _forITunes === "boolean") ? _forITunes : false;
+  async function XML_encodeURL(parent, key, option, isLegacyClient = false, where) {
     if (!parent) return;
     if (Array.isArray(parent)) {
       for (const item of parent) {
-        await XML_encodeURL(item, key, option, _forITunes, where);
+        await XML_encodeURL(item, key, option, isLegacyClient, where);
       }
       return;
     }
@@ -373,8 +394,8 @@ export async function rewriteFeedXML(originalXML,
     if (typeof rawValue !== "string") return;
     const rawURL = URL.parse(rawValue.trim());
     if (!rawURL) return;
-    const finalURL = (forITunes)
-                   ? await encodeHeavy(rawURL, baseURL, option, authorizedAPIKey)
+    const finalURL = (isLegacyClient)
+                   ? await encodeHeavy(rawURL, baseURL, option, authorizedAPIKey, isLegacyClient)
                    : encode(rawURL, baseURL, option, authorizedAPIKey);
     const finalURLString = finalURL.toString();
     parent[key] = (typeof target === "object" && "__cdata" in target) 
@@ -403,7 +424,10 @@ export async function rewriteFeedXML(originalXML,
   });
   
   // 2. Start Processing
-  const maxEntries = 10;
+  // While we do know if its a legacy client. For performance reasons, 
+  // we just cannot heavily encode every URL. 
+  // So only the critical itunes ones get the heavy treatment
+  const maxEntries = (isLegacyClient) ? 10 : 30;
   let xml = parser.parse(originalXML);
   if (xml["?xml-stylesheet"]) delete xml["?xml-stylesheet"]; // Delete any stylesheet
   
@@ -413,16 +437,16 @@ export async function rewriteFeedXML(originalXML,
     // 3.1 Delete itunes:new-feed-url
     delete rssChannel["itunes:new-feed-url"];
     // 3.2 Replace itunes:image
-    await XML_encodeURL(rssChannel["itunes:image"], "@_href", Option.image, true);
+    await XML_encodeURL(rssChannel["itunes:image"], "@_href", Option.image, isLegacyClient);
     // 3.3 Replace Links
-    await XML_encodeURL(rssChannel, "link", Option.auto);
+    await XML_encodeURL(rssChannel, "link", Option.auto, isLegacyClient);
     // 3.4 Replace Self Link
     await XML_encodeURL(rssChannel["atom:link"], "@_href", Option.feed, false, item => {
       return item["@_rel"] === "self";
     });
     // 3.5 Replace the channel image
-    await XML_encodeURL(rssChannel.image, "url", Option.image);
-    await XML_encodeURL(rssChannel.image, "link", Option.auto);
+    await XML_encodeURL(rssChannel.image, "url", Option.image, false);
+    await XML_encodeURL(rssChannel.image, "link", Option.auto, false);
     
     // 4 Patch each item in the channel
     // 4.1 Limit to maxEntries
@@ -435,13 +459,13 @@ export async function rewriteFeedXML(originalXML,
     }
     for (const item of rssChannel.item) {
       // 4.2 Replace the Link property
-      await XML_encodeURL(item, "link", Option.auto);
+      await XML_encodeURL(item, "link", Option.auto, false);
       // 4.3 Replace the itunes image url
-      await XML_encodeURL(item["itunes:image"], "@_href", Option.image, true);
+      await XML_encodeURL(item["itunes:image"], "@_href", Option.image, isLegacyClient);
       // 4.4 Replace enclosure url
-      await XML_encodeURL(item.enclosure, "@_url", Option.asset, true);
+      await XML_encodeURL(item.enclosure, "@_url", Option.asset, isLegacyClient);
       // 4.5 Replace media:content
-      await XML_encodeURL(item["media:content"], "@_url", Option.asset, true);
+      await XML_encodeURL(item["media:content"], "@_url", Option.asset, isLegacyClient);
       // 4.6 Rewrite the HTML in summaries and descriptions
       await XML_rewriteEntryHTML(item);
     }
@@ -472,8 +496,8 @@ export async function rewriteFeedXML(originalXML,
     }
     
     // 5.2 replace logo and icon which are in the spec
-    await XML_encodeURL(rssFeed, "logo", Option.image);
-    await XML_encodeURL(rssFeed, "icon", Option.image);
+    await XML_encodeURL(rssFeed, "logo", Option.image, false);
+    await XML_encodeURL(rssFeed, "icon", Option.image, false);
     
     // 6 Correct all of the entries
     
@@ -684,7 +708,8 @@ export function encode(targetURL,
 export async function encodeHeavy(targetURL, 
                                   baseURL, 
                                   targetOption, 
-                                  authorizedAPIKey) 
+                                  authorizedAPIKey,
+                                  isLegacyClient) 
 {  
   if (!(targetURL  instanceof URL)
    || !(baseURL instanceof URL)
@@ -697,6 +722,7 @@ export async function encodeHeavy(targetURL,
   
   // Get the easy encodedURL
   let encodedURL = encode(targetURL, baseURL, targetOption, authorizedAPIKey);
+  if (!isLegacyClient) return encodedURL;
   
   if (encodedURL.toString().length >= 255 && XP.KVS) {
     // hash the targetURL
